@@ -4,6 +4,7 @@ import '@polymer/paper-checkbox/paper-checkbox.js'
 import './style/tangy-common-styles.js'
 import './style/tangy-element-styles.js'
 import './tangy-input-group.js'
+import { xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from './util/tangy-xapi-utils.js'
 // https://stackoverflow.com/a/2117523/10139471
 function uuid() {
   return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
@@ -123,6 +124,17 @@ export class TangyInputGroups extends PolymerElement {
     return this._value ? this._value : []
   }
 
+  getXapiStatement() {
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.OTHER
+        }
+      },
+      result: xapiResultFactory.default(this)
+    })
+  }
+
   connectedCallback () {
     super.connectedCallback()
     this._template = this.innerHTML
@@ -155,3 +167,4 @@ export class TangyInputGroups extends PolymerElement {
   }
 }
 window.customElements.define(TangyInputGroups.is, TangyInputGroups)
+

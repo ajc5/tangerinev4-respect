@@ -1,1 +1,22 @@
 <div #container> </div>
+
+<!-- xAPI Debug Panel -->
+<div class="xapi-debug-panel">
+  <details>
+    <summary>xAPI Launch Params (Debug)</summary>
+    <table class="xapi-debug-table">
+      <tr>
+        <td class="xapi-debug-label">Endpoint:</td>
+        <td class="xapi-debug-value">{{ xapiDebugInfo.endpoint || 'Not set' }}</td>
+      </tr>
+      <tr>
+        <td class="xapi-debug-label">Auth:</td>
+        <td class="xapi-debug-value">{{ xapiDebugInfo.auth ? '***' : 'Not set' }}</td>
+      </tr>
+      <tr>
+        <td class="xapi-debug-label">Registration:</td>
+        <td class="xapi-debug-value">{{ xapiDebugInfo.registration || 'Not set (will be generated)' }}</td>
+      </tr>
+    </table>
+  </details>
+</div>

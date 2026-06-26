@@ -1,0 +1,289 @@
+PUBLIC LIST OF FORMS OF A GROUP  -----------------------
+
+curl http://localhost:8080/files/group-5d418e71-8820-48f9-833b-ca621f646ec6/assets/forms.json
+
+[
+   {
+      "id":"user-profile",
+      "src":"./assets/user-profile/form.html",
+      "title":null,
+      "listed":false
+   },
+   {
+      "id":"reports",
+      "src":"./assets/reports/form.html",
+      "title":"Reports",
+      "listed":false
+   },
+   {
+      "id":"form-e5b870cc-3faa-412f-8223-950c940a5312",
+      "type":"form",
+      "title":"New Form",
+      "src":"./assets/form-e5b870cc-3faa-412f-8223-950c940a5312/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-8d28b9ef-8764-40dd-8c17-8a2d16476249",
+      "type":"form",
+      "title":"Test Form",
+      "src":"./assets/form-8d28b9ef-8764-40dd-8c17-8a2d16476249/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-b41245f7-4a5e-4f59-a1ed-7ee32316fca1",
+      "type":"form",
+      "title":"xyz form",
+      "src":"./assets/form-b41245f7-4a5e-4f59-a1ed-7ee32316fca1/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-bb773403-9bf7-4896-973f-13a02ada2f1c",
+      "type":"form",
+      "title":"Input Types Form",
+      "src":"./assets/form-bb773403-9bf7-4896-973f-13a02ada2f1c/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   }
+]
+
+
+TANGERINE SERVER CHECK ----------------------
+
+curl -X POST http://localhost:8080/login
+
+{"data":"Invalid Credentials"}
+
+LOGIN ---------------------------------------
+
+curl -X POST http://localhost:8080/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user1", "password": "password"}'  
+
+{
+   "data":{
+      "token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwicGVybWlzc2lvbnMiOnsiZ3JvdXBQZXJtaXNzaW9ucyI6W10sInNpdGV3aWRlUGVybWlzc2lvbnMiOlsiY2FuX2NyZWF0ZV9ncm91cCIsImNhbl92aWV3X3VzZXJzX2xpc3QiLCJjYW5fY3JlYXRlX3VzZXJzIiwiY2FuX2VkaXRfdXNlcnMiLCJjYW5fbWFuYWdlX3VzZXJzX3NpdGVfd2lkZV9wZXJtaXNzaW9ucyJdfSwiaWF0IjoxNzgwODQ0MDU2LCJleHAiOjE3ODA4NDc2NTYsImlzcyI6IlRhbmdlcmluZSIsInN1YiI6InVzZXIxIn0.V0wKbxLEGtW6f_Iglqf70gnfTfD6ScDekzFJ5xhCaJY"
+   }
+}
+
+LIST OF GROUPS FOR A USER ---------------------------------------
+                                                                                               
+curl http://localhost:8080/groups \
+  -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwicGVybWlzc2lvbnMiOnsiZ3JvdXBQZXJtaXNzaW9ucyI6W10sInNpdGV3aWRlUGVybWlzc2lvbnMiOlsiY2FuX2NyZWF0ZV9ncm91cCIsImNhbl92aWV3X3VzZXJzX2xpc3QiLCJjYW5fY3JlYXRlX3VzZXJzIiwiY2FuX2VkaXRfdXNlcnMiLCJjYW5fbWFuYWdlX3VzZXJzX3NpdGVfd2lkZV9wZXJtaXNzaW9ucyJdfSwiaWF0IjoxNzgxMzM4MjY4LCJleHAiOjE3ODEzNDE4NjgsImlzcyI6IlRhbmdlcmluZSIsInN1YiI6InVzZXIxIn0.GcR2eRza3zICXWHVtVE-a1IjXfV8Y-9vgsrU_MZ-JvM"
+
+[
+   {
+      "attributes":{
+         "name":"group-5d418e71-8820-48f9-833b-ca621f646ec6",
+         "roles":[
+            "Admin"
+         ]
+      }
+   },
+   {
+      "attributes":{
+         "name":"group-740bd95c-da28-4399-9fa4-9d6a769ffe29",
+         "roles":[
+            "Admin"
+         ]
+      }
+   }
+]      
+
+LIST OF FORMS OF A GROUP FOR A USER ---------------------------------------
+
+curl -s http://localhost:8080/api/group-5d418e71-8820-48f9-833b-ca621f646ec6/assets/forms.json \
+  -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwicGVybWlzc2lvbnMiOnsiZ3JvdXBQZXJtaXNzaW9ucyI6W10sInNpdGV3aWRlUGVybWlzc2lvbnMiOlsiY2FuX2NyZWF0ZV9ncm91cCIsImNhbl92aWV3X3VzZXJzX2xpc3QiLCJjYW5fY3JlYXRlX3VzZXJzIiwiY2FuX2VkaXRfdXNlcnMiLCJjYW5fbWFuYWdlX3VzZXJzX3NpdGVfd2lkZV9wZXJtaXNzaW9ucyJdfSwiaWF0IjoxNzgwODQ0MDU2LCJleHAiOjE3ODA4NDc2NTYsImlzcyI6IlRhbmdlcmluZSIsInN1YiI6InVzZXIxIn0.V0wKbxLEGtW6f_Iglqf70gnfTfD6ScDekzFJ5xhCaJY"
+
+[
+   {
+      "id":"user-profile",
+      "src":"./assets/user-profile/form.html",
+      "title":null,
+      "listed":false
+   },
+   {
+      "id":"reports",
+      "src":"./assets/reports/form.html",
+      "title":"Reports",
+      "listed":false
+   },
+   {
+      "id":"form-e5b870cc-3faa-412f-8223-950c940a5312",
+      "type":"form",
+      "title":"New Form",
+      "src":"./assets/form-e5b870cc-3faa-412f-8223-950c940a5312/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-8d28b9ef-8764-40dd-8c17-8a2d16476249",
+      "type":"form",
+      "title":"Test Form",
+      "src":"./assets/form-8d28b9ef-8764-40dd-8c17-8a2d16476249/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-b41245f7-4a5e-4f59-a1ed-7ee32316fca1",
+      "type":"form",
+      "title":"xyz form",
+      "src":"./assets/form-b41245f7-4a5e-4f59-a1ed-7ee32316fca1/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   },
+   {
+      "id":"form-bb773403-9bf7-4896-973f-13a02ada2f1c",
+      "type":"form",
+      "title":"Input Types Form",
+      "src":"./assets/form-bb773403-9bf7-4896-973f-13a02ada2f1c/form.html",
+      "searchSettings":{
+         "shouldIndex":false,
+         "variablesToIndex":[
+            
+         ],
+         "primaryTemplate":"",
+         "secondaryTemplate":""
+      },
+      "customSyncSettings":{
+         "enabled":false,
+         "push":false,
+         "pull":false,
+         "excludeIncomplete":false
+      },
+      "couchdbSyncSettings":{
+         "enabled":false,
+         "push":true,
+         "pull":false,
+         "filterByLocation":false
+      }
+   }
+]

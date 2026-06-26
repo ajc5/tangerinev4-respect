@@ -6,6 +6,7 @@ import '../style/mdc-select-style.js'
 import { combTranslations } from 'translation-web-component/util.js'
 import { t } from '../util/t.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getChoiceObjectDefinitionProps, xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-select`
@@ -141,6 +142,18 @@ class TangySelect extends TangyInputBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      },
+      result: xapiResultFactory.choice(this)
+    })
   }
 
   connectedCallback() {

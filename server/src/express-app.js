@@ -6,6 +6,7 @@ const path = require('path')
 const fs = require('fs-extra')
 const fsc = require('fs')
 const PouchDB = require('pouchdb')
+const DB = require('./db.js')
 // const pouchRepStream = require('pouchdb-replication-stream');
 PouchDB.plugin(require('pouchdb-find'));
 // PouchDB.plugin(pouchRepStream.plugin);
@@ -53,6 +54,7 @@ const {permit, permitOnGroupIfAll} = require('./middleware/permitted.js')
 const hasUploadToken = require('./middleware/has-upload-token.js')
 const hasDeviceOrUploadToken = require('./middleware/has-device-token-or-has-upload-token.js')
 const hasSurveyUploadKey = require('./middleware/has-online-survey-upload-key')
+const hasRespectToken = require('./middleware/has-respect-token.js')
 // const isAuthenticatedOrHasUploadToken = require('./middleware/is-authenticated-or-has-upload-token.js')
 const isUnprotected = require("./middleware/is-unprotected");
 const tangerineMySQLApi = require('./mysql-api/index.js');
@@ -129,7 +131,7 @@ app.use(compression())
  */
 
 app.post('/login', login);
-app.get('/login/validate/:userName',
+app.get('/login/validate/:userName', isAuthenticated,
   function (req, res) {
     if (req.user && (req.params.userName === req.user.name)) {
       res.send({ valid: true });
@@ -248,6 +250,7 @@ app.get('/usage/:startdate/:enddate', require('./routes/usage'));
 
 // Static assets.
 app.use('/client', express.static('/tangerine/client/dev'));
+app.use('/opds/images/', express.static('/tangerine/client/content/assets'));
 // app.use('/', express.static('/tangerine/editor/dist/tangerine-editor'));
 
 
@@ -337,7 +340,51 @@ app.use('/editor/:groupId/location-list/delete', require('./routes/group-locatio
 
 app.use('/csv/', isAuthenticated, express.static('/csv/'));
 
-app.use('/releases/', express.static('/tangerine/client/releases'))
+// Set caching headers for all release assets so HTTP caches (including
+// Android WebView caching libraries) can store them for offline use.
+app.use('/releases/', function (req, res, next) {
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  next()
+})
+app.use('/releases/', express.static('/tangerine/client/releases', {
+  maxAge: '1y',
+  immutable: true
+}))
+
+// Fallback: serve tangy-form library files from /tangerine/tangy-form/ when the
+// app requests them at assets/tangy-form/ (needed to render form items offline).
+// This must come BEFORE the general assets fallback below.
+app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets/tangy-form', function (req, res, next) {
+  const tangyFormPath = '/tangerine/tangy-form'
+  return express.static(tangyFormPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+})
+
+// Fallback: serve form HTML files from the group's client/<formId>/ directory
+// at the assets/form/ path (matching release-online-survey-app.sh behavior).
+app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets/form', function (req, res, next) {
+  const groupId = req.params.groupId
+  const formId = req.params.formId
+  const formPath = `/tangerine/groups/${groupId}/client/${formId}`
+  return express.static(formPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+})
+
+// Fallback: serve online-survey-app assets from the group's client directory
+// when the release hasn't been built yet. This allows OPDS-published resources
+// to be pre-cached by an HTTP proxy before the online survey is released.
+app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets', function (req, res, next) {
+  const groupId = req.params.groupId
+  const contentPath = `/tangerine/groups/${groupId}/client`
+  return express.static(contentPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+})
+
+// Fallback: serve online-survey-app shell files (runtime.js, main.js, etc.)
+// from the dist directory when the release hasn't been built yet.
+app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId', function (req, res, next) {
+  const distPath = '/tangerine/online-survey-app/dist/online-survey-app'
+  return express.static(distPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+})
+
 app.use('/client/', express.static('/tangerine/client/builds/dev'))
 
 // app.use('/editor/:group/content/assets', isAuthenticated, function (req, res, next) {
@@ -394,7 +441,17 @@ app.delete('/editor/file/save', isAuthenticated, async function (req, res) {
 app.get('/groups', isAuthenticated, async function (req, res) {
   try {
     const groups = await getGroupsByUser(req.user.name);
-    res.send(groups);
+    const groupsDb = new DB('groups')
+    const enrichedGroups = await Promise.all(groups.map(async (group) => {
+      try {
+        const groupDoc = await groupsDb.get(group.attributes.name)
+        group.attributes.label = groupDoc.label || group.attributes.name
+      } catch (err) {
+        group.attributes.label = group.attributes.name
+      }
+      return group
+    }))
+    res.send(enrichedGroups);
   } catch (error) {
     res.sendStatus(500)
   }
@@ -404,7 +461,17 @@ app.get('/groups/:username', isAuthenticated, async function (req, res) {
   const username = req.params.username;
   try {
     const groups = await getGroupsByUser(username);
-    res.send(groups);
+    const groupsDb = new DB('groups')
+    const enrichedGroups = await Promise.all(groups.map(async (group) => {
+      try {
+        const groupDoc = await groupsDb.get(group.attributes.name)
+        group.attributes.label = groupDoc.label || group.attributes.name
+      } catch (err) {
+        group.attributes.label = group.attributes.name
+      }
+      return group
+    }))
+    res.send(enrichedGroups);
   } catch (error) {
     res.sendStatus(500)
   }
@@ -555,6 +622,483 @@ async function keepAlivePaidWorker() {
   }
 }
 keepAlivePaidWorker()
+
+
+/**
+ * RESPECT App Manifest endpoint.
+ * Returns an app manifest describing this Tangerine instance in the format used by 
+ * UstadMobile/RESPECT Consumer App Integration Guide.
+ * 
+ * The manifest provides app metadata (name, description, icon) and links to the
+ * OPDS catalog of learning units (forms).
+ *
+ * @route GET /respect-app-manifest
+ * @route GET /respect-app-manifest/:groupId
+ * @returns {object} RespectAppManifest JSON
+ */
+app.get('/respect-app-manifest', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const manifest = {
+      "name": {
+          "en-US": "Tangerine"
+      },
+      "description": {
+          "en-US": "Tangerine data collection and reporting platform"
+      },
+      "license": "AGPL-3.0-or-later",
+      "icon": "https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w",
+      "website": "https://www.tangerinecentral.org",
+      "learningUnits": `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`,
+      "defaultLaunchUri": `${baseUrl}`,
+
+      "android": {
+          "packageId": "org.tangerinecentral.tangerine",
+          "stores": ["https://play.google.com/store/apps/details?id=org.tangerinecentral.tangerine"],
+          "sourceCode": "https://github.com/Tangerine-Community/Tangerine"
+      }
+    }
+    res.set('Content-Type', 'application/json')
+    res.send(manifest)
+  } catch (error) {
+    console.error('Error generating Respect App Manifest:', error)
+    res.status(500).send({ error: 'Failed to generate Respect App Manifest' })
+  }
+})
+
+
+/**
+ * Serve group client content files for OPDS resource downloads.
+ * Mirrors the files bundled in PWA and APK releases.
+ *
+ * @route GET /opds/content/:groupId/*
+ */
+app.use('/opds/content/:groupId', hasRespectToken, function (req, res, next) {
+  const groupId = req.params.groupId
+  // If a respectToken is present, verify the user has access to this group
+  if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+    return res.status(403).send({ error: 'Access denied to this group' })
+  }
+  const contentPath = `/tangerine/groups/${groupId}/client`
+  return express.static(contentPath).apply(this, arguments)
+})
+
+// MIME type lookup for common file extensions used in form content.
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.pdf': 'application/pdf',
+  '.xml': 'application/xml',
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.md': 'text/markdown',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.zip': 'application/zip',
+}
+
+// Recursively list all files in a directory, skipping ignored patterns.
+async function listClientFiles(dirPath, baseDir, ignorePatterns = ['node_modules', '.git', 'client-uploads']) {
+  const results = []
+  let entries
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true })
+  } catch (err) {
+    return results
+  }
+  for (const entry of entries) {
+    if (ignorePatterns.includes(entry.name)) continue
+    const fullPath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      const subResults = await listClientFiles(fullPath, baseDir, ignorePatterns)
+      results.push(...subResults)
+    } else if (entry.isFile()) {
+      const relativePath = path.relative(baseDir, fullPath)
+      const ext = path.extname(entry.name).toLowerCase()
+      results.push({
+        relativePath,
+        mimeType: MIME_TYPES[ext] || 'application/octet-stream'
+      })
+    }
+  }
+  return results
+}
+
+/**
+ * OPDS 2.0 Catalog of Groups (RESPECT / UstadMobile format).
+ * Returns an OPDS Navigation Feed listing all Tangerine groups.
+ * Each group entry links to its Readium Web Publication Manifest.
+ *
+ * @route GET /opds/groups
+ * @returns {object} OPDS 2.0 Navigation Feed JSON
+ */
+app.get('/opds/groups', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const groupsListLib = require('./groups-list.js')
+    const GROUPS_DB = new DB('groups')
+
+    let groupIds = await groupsListLib()
+
+    // If a respectToken is present, filter to user's allowed groups
+    if (req.respectUser) {
+      groupIds = groupIds.filter(id => req.respectUser.allowedGroupIds.includes(id))
+    }
+
+    const navigation = []
+
+    for (const groupId of groupIds) {
+      try {
+        const groupDoc = await GROUPS_DB.get(groupId)
+        const label = groupDoc.label || groupId
+        navigation.push({
+          href: `${baseUrl}/opds/groups/${groupId}?respectToken=${req.query.respectToken}`,
+          title: label,
+          type: 'application/opds+json',
+          alternate: [
+            {
+              href: `${baseUrl}/opds/images/group.png`,
+              rel: 'icon',
+              type: 'image/png',
+              title: `${label} cover`
+            }
+          ]
+        })
+      } catch (err) {
+        // Group doc may not exist in PouchDB yet; fall back to groupId as label
+        navigation.push({
+          href: `${baseUrl}/opds/groups/${groupId}?respectToken=${req.query.respectToken}`,
+          title: groupId,
+          type: 'application/opds+json',
+          alternate: [
+            {
+              href: `${baseUrl}/opds/images/group.png`,
+              rel: 'icon',
+              type: 'image/png',
+              title: `${groupId} cover`
+            }
+          ]
+        })
+      }
+    }
+
+    navigation.sort((a, b) => a.title.localeCompare(b.title))
+
+    const opdsCatalog = {
+      metadata: {
+        title: 'Tangerine Groups'
+      },
+      links: [
+        { rel: 'self', href: `${baseUrl}/opds/groups`, type: 'application/opds+json' }
+      ],
+      navigation
+    }
+
+    res.set('Content-Type', 'application/opds+json')
+    res.send(opdsCatalog)
+  } catch (error) {
+    console.error('Error generating OPDS Groups catalog:', error)
+    res.status(500).send({ error: 'Failed to generate OPDS Groups catalog' })
+  }
+})
+
+/**
+ * OPDS 2.0 Publication Listing for a Group.
+ * Lists all forms in the group as publications, each with metadata, links,
+ * and images pointing to the online-survey-app URL for that form.
+ *
+ * @route GET /opds/groups/:groupId
+ * @returns {object} OPDS 2.0 Publication Listing JSON
+ */
+app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const groupId = req.params.groupId
+
+    // If a respectToken is present, verify the user has access to this group
+    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+      return res.status(403).send({ error: 'Access denied to this group' })
+    }
+
+    const GROUPS_DB = new DB('groups')
+    const formsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
+
+    // Get group metadata and published online surveys
+    let groupLabel = groupId
+    let publishedFormIds = []
+    try {
+      const groupDoc = await GROUPS_DB.get(groupId)
+      groupLabel = groupDoc.label || groupId
+      const onlineSurveys = groupDoc.onlineSurveys || []
+      publishedFormIds = onlineSurveys.filter(s => s.published).map(s => s.formId)
+    } catch (err) {
+      // Group doc may not exist; continue with groupId as label
+    }
+
+    // Read forms.json
+    let forms = []
+    try {
+      forms = await fs.readJson(formsPath)
+    } catch (err) {
+      forms = []
+    }
+
+    // Filter to non-archived, listed forms that also have published online surveys
+    const listedForms = forms
+      .filter(f => !f.archived && f.listed !== false && publishedFormIds.includes(f.id))
+      .sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id))
+
+    // Build publications array
+    const publications = []
+
+    for (const form of listedForms) {
+      const formId = form.id
+      const formTitle = form.title || formId
+      const formSrc = form.src || ''
+      const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
+
+      // Determine a cover image
+      const images = []
+      if (form.cover) {
+        images.push({
+          href: `${baseUrl}/opds/images/${form.cover}`,
+          type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
+        })
+      } else {
+        images.push({
+          href: `${baseUrl}/opds/images/form.png`,
+          type: 'image/png'
+        })
+      }
+
+      publications.push({
+        metadata: {
+          '@type': 'http://schema.org/Game',
+          title: formTitle,
+          author: groupLabel,
+          identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
+          language: 'en',
+          modified: new Date().toISOString()
+        },
+        links: [
+          { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
+          { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
+        ],
+        images
+      })
+    }
+
+    const opdsCatalog = {
+      metadata: {
+        title: `${groupLabel} - Forms`
+      },
+      links: [
+        { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}?respectToken=${req.query.respectToken}`, type: 'application/opds+json' }
+      ],
+      publications
+    }
+
+    res.set('Content-Type', 'application/opds+json')
+    res.send(opdsCatalog)
+  } catch (error) {
+    console.error('Error generating OPDS catalog for group:', error)
+    res.status(500).send({ error: 'Failed to generate OPDS catalog for group' })
+  }
+})
+
+/**
+ * OPDS 2.0 Publication Detail for a Form.
+ * Returns full publication metadata, links, images, and resources
+ * for a single form, pointing to the online-survey-app URL.
+ *
+ * @route GET /opds/groups/:groupId/:formId
+ * @returns {object} OPDS 2.0 Publication JSON
+ */
+app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const groupId = req.params.groupId
+    const formId = req.params.formId
+
+    // If a respectToken is present, verify the user has access to this group
+    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+      return res.status(403).send({ error: 'Access denied to this group' })
+    }
+
+    const GROUPS_DB = new DB('groups')
+    const formsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
+
+    // Get group metadata and published online surveys
+    let groupLabel = groupId
+    let publishedFormIds = []
+    try {
+      const groupDoc = await GROUPS_DB.get(groupId)
+      groupLabel = groupDoc.label || groupId
+      const onlineSurveys = groupDoc.onlineSurveys || []
+      publishedFormIds = onlineSurveys.filter(s => s.published).map(s => s.formId)
+    } catch (err) {
+      // Group doc may not exist; continue with groupId as label
+    }
+
+    // Read forms.json to find the form definition
+    let form = null
+    let formTitle = formId
+    try {
+      const forms = await fs.readJson(formsPath)
+      form = forms.find(f => f.id === formId)
+      if (form && form.title) {
+        formTitle = form.title
+      }
+    } catch (err) {
+      // forms.json not found; use formId as title
+    }
+
+    const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
+
+    // Build images from form definition
+    const images = []
+    if (form && Array.isArray(form.images)) {
+      for (const img of form.images) {
+        const href = img.href.startsWith('http') ? img.href : `${baseUrl}/opds/images/${img.href}`
+        images.push({
+          href,
+          type: img.type || 'image/jpeg',
+          ...(img.height ? { height: img.height } : {}),
+          ...(img.width ? { width: img.width } : {})
+        })
+      }
+    } else if (form && form.cover) {
+      images.push({
+        href: `${baseUrl}/opds/images/${form.cover}`,
+        type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
+      })
+    } else {
+      images.push({
+        href: `${baseUrl}/opds/images/form.png`,
+        type: 'image/png'
+      })
+    }
+
+    // Build resources: list all files required to render the online survey form.
+    // This includes both the Angular app shell files (from the dist) and the
+    // group content files (from the client directory). URLs match what the
+    // browser actually requests when loading the online survey, so an HTTP
+    // proxy can pre-cache them for offline use.
+    const resources = []
+    const releaseBaseUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}`
+    const assetsBaseUrl = `${releaseBaseUrl}/assets`
+    const clientDir = `/tangerine/groups/${groupId}/client`
+    const distDir = '/tangerine/online-survey-app/dist/online-survey-app'
+
+    // Helper: add a resource at the assets/ path.
+    function addAssetResource(relativePath, mimeType) {
+      resources.push({ href: `${assetsBaseUrl}/${relativePath}`, type: mimeType })
+    }
+    // Helper: add a resource at the release root path.
+    function addRootResource(relativePath, mimeType) {
+      resources.push({ href: `${releaseBaseUrl}/${relativePath}`, type: mimeType })
+    }
+
+    // 1. App shell files from the online-survey-app dist (runtime.js, main.js, etc.).
+    try {
+      const distFiles = await listClientFiles(distDir, distDir, [])
+      for (const file of distFiles) {
+        addRootResource(file.relativePath, file.mimeType)
+      }
+    } catch (err) {
+      console.error(`Error listing dist files:`, err)
+    }
+
+    // 2. Group client content files (form HTML, translations, custom scripts, media, etc.).
+    //    The release-online-survey-app.sh script maps:
+    //      client/<formId>/*.html  →  assets/form/<filename>
+    //      everything else         →  assets/<relativePath>
+    try {
+      const clientFiles = await listClientFiles(clientDir, clientDir)
+      for (const file of clientFiles) {
+        // Form HTML files go to assets/form/ (matching release-online-survey-app.sh).
+        if (file.relativePath.startsWith(`${formId}/`)) {
+          const filename = path.basename(file.relativePath)
+          addAssetResource(`form/${filename}`, file.mimeType)
+        } else {
+          addAssetResource(file.relativePath, file.mimeType)
+        }
+      }
+    } catch (err) {
+      console.error(`Error listing client files for group ${groupId}:`, err)
+    }
+
+    // 3. Tangerine-level translations (copied by release-online-survey-app.sh).
+    const tangerineTranslationsDir = '/tangerine/translations'
+    try {
+      const translationFiles = await listClientFiles(tangerineTranslationsDir, tangerineTranslationsDir, [])
+      for (const file of translationFiles) {
+        addAssetResource(file.relativePath, file.mimeType)
+      }
+    } catch (err) {
+      // Translations dir may not exist; skip.
+    }
+
+    // 4. Tangy-form library files (web components for tangy-form, tangy-input, etc.).
+    //    Needed to render form items offline.
+    const tangyFormDir = '/tangerine/tangy-form'
+    try {
+      const dirExists = await fs.pathExists(tangyFormDir)
+      if (dirExists) {
+        const tangyFormFiles = await listClientFiles(tangyFormDir, tangyFormDir, ['node_modules', 'test', 'demo', 'docs', '.github'])
+        console.log(`OPDS: Found ${tangyFormFiles.length} tangy-form files for group ${groupId}`)
+        for (const file of tangyFormFiles) {
+          addAssetResource(`tangy-form/${file.relativePath}`, file.mimeType)
+        }
+      } else {
+        console.warn(`OPDS: tangy-form dir not found at ${tangyFormDir}`)
+      }
+    } catch (err) {
+      console.error('Error listing tangy-form files:', err)
+    }
+
+    const publication = {
+      metadata: {
+        '@type': 'http://schema.org/Game',
+        title: formTitle,
+        author: groupLabel,
+        identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
+        language: 'en',
+        modified: new Date().toISOString()
+      },
+      links: [
+        { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
+        { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
+      ],
+      images,
+      resources
+    }
+
+    res.set('Content-Type', 'application/opds-publication+json')
+    res.send(publication)
+  } catch (error) {
+    console.error('Error generating OPDS publication for form:', error)
+    res.status(500).send({ error: 'Failed to generate OPDS publication for form' })
+  }
+})
 
 await tangyModules.hook('declareAppRoutes', {app})
 

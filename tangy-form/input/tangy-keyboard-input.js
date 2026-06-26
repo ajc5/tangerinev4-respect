@@ -3,6 +3,7 @@ import '../util/html-element-props.js'
 import '../style/tangy-common-styles.js'
 import '../style/tangy-element-styles.js'
 import { TangyInputLitBase } from '../tangy-input-lit-base.js'
+import { getXapiFillInStatement } from '../util/tangy-xapi-utils.js'
 
     /**
      * `tangy-keyboard-input`
@@ -349,6 +350,10 @@ export class TangyKeyboardInput extends TangyInputLitBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    return getXapiFillInStatement(this);
   }
 
   connectedCallback () {

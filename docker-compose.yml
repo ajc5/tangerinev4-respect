@@ -36,14 +36,14 @@ services:
         context: .
         dockerfile: ./docker-build-files/Dockerfile-server
       ports:
-        - "82:80"
+        - "8083:80"
         # - "9229:9229" # for debugging
       restart: unless-stopped
       env_file: config.env
       environment:
         - T_COUCHDB_USER_ADMIN_NAME=/run/secrets/couchdb_admin_name
         - T_COUCHDB_USER_ADMIN_PASS=/run/secrets/couchdb_admin_password
-        - T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/
+        - T_COUCHDB_ENDPOINT=http://admin:password@couchdbv4:5984/
         - "NODE_ENV=development"
         - NPM_DEV_MODE
       entrypoint: "/bin/sh -c \"cd /tangerine/server/ && npm run start$${NPM_DEV_MODE}\""
@@ -68,7 +68,10 @@ services:
 #        - ./data/id_rsa.pub:/root/.ssh/id_rsa.pub:delegated \
         - ./translations:/tangerine/translations:delegated \
         - ./online-survey-app/src:/tangerine/online-survey-app/src:delegated \
+        - ./online-survey-app/dist/online-survey-app:/tangerine/online-survey-app/dist/online-survey-app:ro \
+        - ./tangy-form:/tangerine/tangy-form:delegated \
         - ./server/entrypoint-server.sh:/tangerine/server/entrypoint-server.sh:delegated
+        - ./editor/dist/tangerine-editor:/tangerine/editor/dist/tangerine-editor:delegated
         - ./data/ssh:/root/.ssh:delegated \
         - ./data/state:/state:delegated \
 
@@ -82,19 +85,19 @@ services:
       context: .
       dockerfile: ./docker-build-files/Dockerfile-server-ui
     ports:
-      - "81:80"
+      - "8082:80"
     restart: unless-stopped
     env_file: config.env
     environment:
       - T_COUCHDB_USER_ADMIN_NAME=/run/secrets/couchdb_admin_name
       - T_COUCHDB_USER_ADMIN_PASS=/run/secrets/couchdb_admin_password
-      - T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/
+      - T_COUCHDB_ENDPOINT=http://admin:password@couchdbv4:5984/
       - "NODE_ENV=development"
       - NPM_DEV_MODE
       - TANGY_PRE_ENTRYPOINT
 #    entrypoint: "/bin/sh -c \"$${TANGY_PRE_ENTRYPOINT} cd /tangerine/server-ui/ && npm run start$${NPM_DEV_MODE}\""
-#    entrypoint: "/bin/sh -c \"cd /tangerine/editor && npm run dockerdev && cd /tangerine/server-ui/ && npm run start$${NPM_DEV_MODE}\""
-    entrypoint: "/bin/sh -c \"cd /tangerine/server-ui/ && npm run start$${NPM_DEV_MODE}\""
+    entrypoint: "/bin/sh -c \"cd /tangerine/editor && npm run dockerdev & cd /tangerine/server-ui/ && npm run start$${NPM_DEV_MODE}\""
+#    entrypoint: "/bin/sh -c \"cd /tangerine/server-ui/ && npm run start$${NPM_DEV_MODE}\""
     volumes:
       - ./data/groups:/tangerine/groups
       - ./editor/package.json:/tangerine/editor/package.json:delegated
@@ -105,6 +108,7 @@ services:
       - ./server-ui/src:/tangerine/server-ui/src:delegated
       - ./tangy-form-editor:/tangerine/tangy-form-editor:delegated
       - ./tangy-form:/tangerine/tangy-form:delegated
+      - ./editor/dist/tangerine-editor:/tangerine/editor/dist/tangerine-editor:delegated
 
   apk-generator:
     container_name: "apk-generator"
@@ -116,13 +120,13 @@ services:
       context: .
       dockerfile: ./docker-build-files/Dockerfile-apk
     ports:
-      - "83:80"
+      - "8086:80"
     restart: unless-stopped
     env_file: config.env
     environment:
       - T_COUCHDB_USER_ADMIN_NAME=/run/secrets/couchdb_admin_name
       - T_COUCHDB_USER_ADMIN_PASS=/run/secrets/couchdb_admin_password
-      - T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/
+      - T_COUCHDB_ENDPOINT=http://admin:password@couchdbv4:5984/
       - "NODE_ENV=development"
       - NPM_DEV_MODE
     entrypoint: "/bin/sh -c \"cd /tangerine/apk-generator/ && npm run start$${NPM_DEV_MODE}\""
@@ -147,6 +151,7 @@ services:
 #      - ./data/id_rsa.pub:/root/.ssh/id_rsa.pub:delegated \
       - ./translations:/tangerine/translations:delegated \
       - ./online-survey-app/src:/tangerine/online-survey-app/src:delegated \
+      - ./online-survey-app/dist/online-survey-app:/tangerine/online-survey-app/dist/online-survey-app:ro \
       - ./tangy-form-editor:/tangerine/tangy-form-editor:delegated
       - ./tangy-form:/tangerine/tangy-form:delegated
 
@@ -161,17 +166,17 @@ services:
     volumes:
       - './nginx/default.conf:/etc/nginx/conf.d/default.conf'
     ports:
-      - '80:80'
+      - '8080:80'
 
   couchdb:
-    container_name: "couchdb"
+    container_name: "couchdbv4"
     depends_on:
       - init
     build:
       context: .
       dockerfile: ./docker-build-files/Dockerfile-couchdb
     ports:
-      - "5984:5984"
+      - "5990:5984"
     volumes:
       - ./data/couchdb/data:/opt/couchdb/data
       - ./data/couchdb/local.d:/opt/couchdb/etc/local.d

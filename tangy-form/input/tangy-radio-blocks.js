@@ -6,6 +6,8 @@ import '../style/tangy-element-styles.js';
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
 import './tangy-radio-block.js'
+import { getChoiceObjectDefinitionProps, xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
+
 /**
  * `tangy-radio-blocks`
  *
@@ -83,7 +85,7 @@ export class TangyRadioBlocks extends TangyInputBase {
         </div>
       </div>
     `;
-  }
+  }              
 
   static get properties() {
     return {
@@ -207,6 +209,19 @@ export class TangyRadioBlocks extends TangyInputBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    let statement = generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      }
+    })
+    statement.result = xapiResultFactory.choice(this, statement.object.definition.correctResponsesPattern)
+    return statement;
   }
 
   ready() {

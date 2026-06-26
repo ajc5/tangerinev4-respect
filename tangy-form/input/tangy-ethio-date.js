@@ -7,6 +7,7 @@ import { t } from '../util/t.js'
 import moment from 'moment'
 import * as ethiopianDate from 'ethiopian-date/index.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiFillInStatement } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-ethio-date`
@@ -221,6 +222,14 @@ export class TangyEthiopianDate extends TangyInputBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    let statement = getXapiFillInStatement(this);
+    statement.result.extensions = {
+      "http://tangerinecentral.org/xapi/extensions/calendar-system": "ethiopian"
+    }
+    return statement;
   }
 
   connectedCallback() {

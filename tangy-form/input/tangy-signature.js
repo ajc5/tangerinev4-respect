@@ -6,6 +6,7 @@ import '../style/tangy-element-styles.js'
 import '@polymer/iron-icon/iron-icon.js'
 import '@polymer/paper-button/paper-button.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 
 /**
@@ -159,6 +160,17 @@ export class TangySignature extends TangyInputBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.OTHER
+        }
+      },
+      result: xapiResultFactory.default(this)
+    })
   }
 
   connectedCallback() {

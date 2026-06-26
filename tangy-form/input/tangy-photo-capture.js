@@ -5,6 +5,7 @@ import '../style/tangy-element-styles.js'
 import '@polymer/iron-icon/iron-icon.js'
 import '@polymer/paper-button/paper-button.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiMediaStatement } from '../util/tangy-xapi-utils.js';
 
 import ImageBlobReduce from 'image-blob-reduce'
 
@@ -197,6 +198,10 @@ export class TangyPhotoCapture extends TangyInputBase {
      }
   }
 
+  getXapiStatement() {
+    return getXapiMediaStatement(this);
+  }
+
   connectedCallback () {
     super.connectedCallback()
     this.shadowRoot.querySelector('#qnum-number').innerHTML = this.hasAttribute('question-number') 
@@ -257,7 +262,6 @@ export class TangyPhotoCapture extends TangyInputBase {
   }
 
   reflect() {
-    if (!this.ready) return
     if (this.shadowRoot.querySelector('#photoCaptureImage') && (this.shadowRoot.querySelector('#photoCaptureImage').src === '')) return
     this.shadowRoot.querySelector('video').style.display = 'none'
     this.shadowRoot.querySelector('#photoCaptureImage').style.display = 'block'

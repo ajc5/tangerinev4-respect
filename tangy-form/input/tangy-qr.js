@@ -9,6 +9,8 @@ import '@polymer/iron-icon/iron-icon.js'
 import '@polymer/iron-icons/image-icons.js'
 import { t } from '../util/t.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiFillInStatement } from '../util/tangy-xapi-utils.js'
+
 /**
  * `tangy-scan`
  * 
@@ -188,6 +190,10 @@ class TangyQr extends TangyInputBase {
     };
   }
 
+  getXapiStatement() {
+    return getXapiFillInStatement(this);
+  }
+  
   connectedCallback() {
     super.connectedCallback()
     this.t = {

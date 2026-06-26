@@ -7,6 +7,7 @@ import '@polymer/paper-input/paper-input.js'
 import '../style/tangy-common-styles.js'
 import '../style/tangy-element-styles.js'
 import { combTranslations } from 'translation-web-component/util.js'
+import { getXapiFillInStatement, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-input`
@@ -190,6 +191,14 @@ export class TangyInput extends TangyInputBase {
     }
   }
 
+  getXapiStatement() {
+    let statement = getXapiFillInStatement(this);
+    if (this.type === 'number') {
+      statement.object.definition.interactionType = XAPI_INTERACTION_TYPE.NUMERIC
+    }
+    return statement;
+  }
+  
   connectedCallback() {
     super.connectedCallback()
     // Template.
@@ -226,9 +235,10 @@ export class TangyInput extends TangyInputBase {
         bubbles: true
       }))
     })
+    document.body.addEventListener('lang-ready', this.reflect.bind(this))
     this.ready = true
     this.reflect()
-
+    
   }
 
   reflect() {

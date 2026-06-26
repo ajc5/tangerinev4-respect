@@ -3,6 +3,7 @@ import '../util/html-element-props.js'
 import './tangy-radio-buttons.js'
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getChoiceObjectDefinitionProps, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE, setXapiResultCommon } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-acasi`
@@ -171,6 +172,32 @@ export class TangyEftouch extends TangyInputBase {
         reflectToAttribute: true
       }
     };
+  }
+
+  getXapiStatement() {
+    let statement = generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      }
+    })
+    let result = {};
+    if (this.value && this.value.selection && this.value.selection.length > 0) {
+      const selectedValues = this.value.selection;
+      result.response = selectedValues.join('[,]');
+      if (statement.object.definition.correctResponsesPattern) {
+        const correctResponses = statement.object.definition.correctResponsesPattern || [];
+        const allCorrect = selectedValues.every(v => correctResponses.includes(v)) &&
+          selectedValues.length === correctResponses.length;
+        result.success = allCorrect;
+        result.score = { scaled: allCorrect ? 1 : 0 };
+      }
+    }
+    setXapiResultCommon(result);
+    statement.result = result;
+    return statement;
   }
 
   static get template () {

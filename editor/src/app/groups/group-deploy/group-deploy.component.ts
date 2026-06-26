@@ -25,7 +25,7 @@ export class GroupDeployComponent implements OnInit {
 
   async ngOnInit() {
     this.breadcrumbs = []
-    this.groupId = window.location.pathname.split('/')[2]
+    this.groupId = window.location.hash.split('/')[2]
     const process = this.processMonitor.start('group-deploy', 'Loading...')
     const config = await this.serverConfig.getServerConfig()
     this.syncProtocol2Enabled = !!(config.enabledModules.find(module=>module==='sync-protocol-2'))

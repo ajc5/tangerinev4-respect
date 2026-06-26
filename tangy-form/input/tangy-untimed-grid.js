@@ -9,6 +9,7 @@ import '@polymer/iron-icon/iron-icon.js';
 import './tangy-toggle-button.js';
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getChoiceObjectDefinitionProps, xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-untimed-grid`
@@ -174,6 +175,11 @@ class TangyUntimedGrid extends TangyInputBase {
         value: undefined,
         reflectToAttribute: true
       },
+      autoStopMode: {
+        type: String,
+        value: 'first', // 'first' or 'consecutive'
+        reflectToAttribute: true
+      },
       gridAutoStopped: {
         type: Boolean,
         value: undefined,
@@ -257,6 +263,18 @@ class TangyUntimedGrid extends TangyInputBase {
     };
   }
 
+  getXapiStatement() {
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      },
+      result: xapiResultFactory.grid(this)
+    })
+  }
+  
   ready() {
     super.ready();
     const styleEl = document.createElement("style")
@@ -340,7 +358,7 @@ class TangyUntimedGrid extends TangyInputBase {
       })
       this.value = newValue
     }
-
+    
   }
 
   // Note that mode is actually this.value.
@@ -474,14 +492,29 @@ class TangyUntimedGrid extends TangyInputBase {
 
   shouldGridAutoStop() {
     const tangyToggleButtons = [].slice.call(this.shadowRoot.querySelectorAll('tangy-toggle-button'))
-    const firstXButtons = tangyToggleButtons.slice(0, this.autoStop)
-    let foundAnUnpressedButton = false
-    for (let button of firstXButtons) {
-      if (!button.pressed) {
-        foundAnUnpressedButton = true
+    if (this.autoStopMode === 'first') {
+      const firstXButtons = tangyToggleButtons.slice(0, this.autoStop)
+      let foundAnUnpressedButton = false
+      for (let button of firstXButtons) {
+        if (!button.pressed) {
+          foundAnUnpressedButton = true
+        }
       }
+      return foundAnUnpressedButton ? false : true
+    } else if (this.autoStopMode === 'consecutive') {
+      let consecutiveCount = 0
+      for (let button of tangyToggleButtons) {
+        if (button.pressed) {
+          consecutiveCount++
+          if (consecutiveCount >= this.autoStop) {
+            return true
+          }
+        } else {
+          consecutiveCount = 0
+        }
+      }
+      return false
     }
-    return foundAnUnpressedButton ? false : true
   }
 
   onStopClick(event, lastItemAttempted) {

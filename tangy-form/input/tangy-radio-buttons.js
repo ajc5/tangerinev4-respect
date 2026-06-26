@@ -5,6 +5,7 @@ import './tangy-radio-button.js'
 import '../style/tangy-element-styles.js';
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getChoiceObjectDefinitionProps, xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 /**
  * `tangy-radio-buttons`
  *
@@ -201,16 +202,23 @@ class TangyRadioButtons extends TangyInputBase {
     }
   }
 
+  getXapiStatement() {
+    let statement = generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      }
+    })
+    statement.result = xapiResultFactory.choice(this, statement.object.definition.correctResponsesPattern)
+    return statement;
+  }
+
   ready() {
-    super.ready()
+    super.ready() 
     this.render()
     this.reflect()
-    this.shadowRoot.querySelector('.hint-text').innerHTML = this.hasAttribute('hint-text')
-        ? this.getAttribute('hint-text')
-        : ''
-    this.shadowRoot.querySelector('#label').innerHTML = this.hasAttribute('label')
-        ? this.getAttribute('label')
-        : ''
   }
 
   reflect() {
@@ -220,10 +228,16 @@ class TangyRadioButtons extends TangyInputBase {
       el.disabled = this.disabled
       el.hidden = this.hidden
     })
+    this.shadowRoot.querySelector('.hint-text').innerHTML = this.hasAttribute('hint-text')
+    ? this.getAttribute('hint-text')
+    : ''
+    this.shadowRoot.querySelector('#label').innerHTML = this.hasAttribute('label')
+        ? this.getAttribute('label')
+        : ''
+    this.$['qnum-number'].innerHTML = `<label>${this.questionNumber}</label>`;
   }
 
   render() {
-    this.$['qnum-number'].innerHTML = `<label>${this.questionNumber}</label>`;
     this.$.container.innerHTML = ''
     // Populate options as tangy-radio-button elements
     let options = this.querySelectorAll('option')
@@ -277,13 +291,13 @@ class TangyRadioButtons extends TangyInputBase {
 
   onRadioButtonChange(event) {
     let targetButton = event.target
-    if (targetButton.value = 'on') {
+    if (targetButton.value === 'on') {
       this
         .$
         .container
         .querySelectorAll('tangy-radio-button')
         .forEach(el => {
-          if (el.name !== targetButton.name && targetButton.value == 'on') {
+          if (el.name !== targetButton.name) {
             el.value = ''
           }
         })

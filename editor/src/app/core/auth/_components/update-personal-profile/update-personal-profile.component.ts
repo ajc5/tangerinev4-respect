@@ -24,7 +24,8 @@ export class UpdatePersonalProfileComponent implements OnInit {
   passwordPolicy: string
   passwordRecipe: string
   config:any = { enabledModules: [] }
-  
+  baseUrl = window.location.origin;
+
   constructor(
     private menuService: MenuService,
     private userService: UserService,
@@ -84,5 +85,13 @@ export class UpdatePersonalProfileComponent implements OnInit {
     } catch (error) {
       this.errorHandler.handleError(_TRANSLATE('User Details could not be Updated'));
     }
+  }
+  copyOpdsUrl() {
+    const url = `${this.baseUrl}/respect-app-manifest?respectToken=${this.user.respectToken}`;
+    navigator.clipboard.writeText(url).then(() => {
+      this.errorHandler.handleError(_TRANSLATE('URL copied to clipboard'));
+    }).catch(() => {
+      this.errorHandler.handleError(_TRANSLATE('Failed to copy URL'));
+    });
   }
 }

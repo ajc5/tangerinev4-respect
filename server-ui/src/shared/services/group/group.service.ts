@@ -165,8 +165,9 @@ export class GroupService {
   //   const created = new Date().toJSON();
   //   const adminRole = { role: 'Admin', permissions: permissionsList.groupPermissions.filter(permission => permission !== 'can_manage_group_roles' && permission !== 'can_access_dashboard') };
   //   const memberRole = { role: 'Member', permissions: ['can_access_author', 'can_access_forms', 'can_access_data', 'can_access_download_csv'] };
+  //   const appUserRole = { role: 'App User', permissions: ['can_access_forms'] };
   //   const group = {_id: groupId, label, created, roles : [
-  //     adminRole, memberRole,
+  //     adminRole, memberRole, appUserRole,
   //   ]} as Group ;
   //   await this.groupsDb.put(group);
   //   if (username !== process.env.T_USER1) {

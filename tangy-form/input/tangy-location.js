@@ -6,6 +6,7 @@ import '@polymer/paper-input/paper-input.js'
 import '../style/tangy-element-styles.js';
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { XAPI_INTERACTION_TYPE, generateXapiStatementFromTemplate, setXapiResultCommon } from '../util/tangy-xapi-utils.js';
 /**
  * `tangy-location`
  * 
@@ -564,6 +565,28 @@ class TangyLocation extends TangyInputBase {
     this._flatLocationList = Loc.flatten(locationList)
   }
 
+  getXapiStatement() {
+    let result = {};
+    let locationValue = Array.isArray(this.value) ? this.value : [];
+    result.response = locationValue.filter(v => v.value).map(v => v.value).join('[,]');
+    result.extensions = {
+      "http://tangerinecentral.org/xapi/extensions/location": locationValue.filter(v => v.value).map(v => ({[v.level]: v.value}))
+    }
+    setXapiResultCommon(result);
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          extensions: {
+            "http://tangerinecentral.org/xapi/extensions/location-src": this.getAttribute('location-src') || '',
+            ...(this.getAttribute('show-levels') && {"http://tangerinecentral.org/xapi/extensions/show-levels": this.getAttribute('show-levels')})
+          }
+        }
+      },
+      result
+    })
+  }
+  
   async connectedCallback() {
     super.connectedCallback();
     this._template = this.innerHTML

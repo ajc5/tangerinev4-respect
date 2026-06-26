@@ -36,6 +36,14 @@
     </mat-form-field>
     <br>
     <br>
+    <div *ngIf="user.respectToken" style="margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+      <label style="font-weight:500; color:rgba(0,0,0,0.54); font-size:12px;">{{'RESPECT Link'|translate}}</label>
+      <button mat-icon-button type="button" (click)="copyOpdsUrl()" title="{{'Copy RESPECT Link'|translate}}">
+        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
+      </button>
+    </div>
+    <br>
+    <br>
     <mat-checkbox [(ngModel)]="updateUserPassword" name="updateUserPassword">Update User password?</mat-checkbox>
     <br>
     <br>

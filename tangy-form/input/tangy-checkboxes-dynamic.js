@@ -5,6 +5,7 @@ import './tangy-checkbox.js'
 import '../style/tangy-element-styles.js';
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getChoiceObjectDefinitionProps, xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-checkboxes`
@@ -133,6 +134,18 @@ class TangyCheckboxesDynamic extends TangyInputBase {
 
   set optionsList(optionsList) {
     this._optionsList = optionsList
+  }
+
+  getXapiStatement() {
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          ...getChoiceObjectDefinitionProps(this)
+        }
+      },
+      result: xapiResultFactory.choice(this)
+    })
   }
 
   connectedCallback() {

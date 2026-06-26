@@ -14,6 +14,19 @@
     <mat-header-cell *matHeaderCellDef> {{'Email'|translate}} </mat-header-cell>
     <mat-cell *matCellDef="let user"> {{user.email}} </mat-cell>
   </ng-container>
+  <ng-container matColumnDef="publicAccessUrl">
+    <mat-header-cell *matHeaderCellDef> {{'RESPECT Link'|translate}} </mat-header-cell>
+    <mat-cell *matCellDef="let user">
+      <span *ngIf="user.respectToken"
+        class="tangy-foreground-primary"
+        (click)="copyOpdsUrl(user)"
+        title="{{'Copy RESPECT Link'|translate}}"
+        style="cursor:pointer;">
+        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
+      </span>
+      <span *ngIf="!user.respectToken" class="tangy-foreground-secondary">—</span>
+    </mat-cell>
+  </ng-container>
   <ng-container matColumnDef="actions">
     <mat-header-cell *matHeaderCellDef> {{'Actions'|translate}} </mat-header-cell>
     <mat-cell *matCellDef="let user" >
@@ -55,6 +68,19 @@
   <ng-container matColumnDef="email">
     <mat-header-cell *matHeaderCellDef> {{'Email'|translate}} </mat-header-cell>
     <mat-cell *matCellDef="let user"> {{user.email}} </mat-cell>
+  </ng-container>
+  <ng-container matColumnDef="publicAccessUrl">
+    <mat-header-cell *matHeaderCellDef> {{'RESPECT Link'|translate}} </mat-header-cell>
+    <mat-cell *matCellDef="let user">
+      <span *ngIf="user.respectToken"
+        class="tangy-foreground-primary"
+        (click)="copyOpdsUrl(user)"
+        title="{{'Copy RESPECT Link'|translate}}"
+        style="cursor:pointer;">
+        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
+      </span>
+      <span *ngIf="!user.respectToken" class="tangy-foreground-secondary">—</span>
+    </mat-cell>
   </ng-container>
   <ng-container matColumnDef="actions">
     <mat-header-cell *matHeaderCellDef> {{'Actions'|translate}} </mat-header-cell>

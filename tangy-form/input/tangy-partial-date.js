@@ -6,6 +6,8 @@ import '../style/mdc-select-style.js'
 import { t } from '../util/t.js'
 import moment from 'moment'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiFillInStatement } from '../util/tangy-xapi-utils.js'
+
 /**
  * `tangy-partial-date`
  *
@@ -221,6 +223,10 @@ export class TangyPartialDate extends TangyInputBase {
     }
   }
 
+  getXapiStatement() {
+    return getXapiFillInStatement(this);
+  }
+  
   connectedCallback() {
     super.connectedCallback()
     this.missingDateErrorText = this.missingDateErrorText === '' ? t("The date is missing. Please enter a valid date.") : this.missingDateErrorText

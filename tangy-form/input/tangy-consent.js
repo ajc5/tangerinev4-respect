@@ -7,6 +7,7 @@ import '@polymer/iron-icon/iron-icon.js'
 import '@polymer/iron-icons/image-icons.js'
 import { t } from '../util/t.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiTrueFalseStatement } from '../util/tangy-xapi-utils.js';
 
 /**
  * `tangy-consent`
@@ -175,6 +176,10 @@ class TangyConsent extends TangyInputBase {
     };
   }
 
+  getXapiStatement() {
+    return getXapiTrueFalseStatement(this);
+  }
+  
   connectedCallback() {
     super.connectedCallback();
     this.t = {

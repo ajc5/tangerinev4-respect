@@ -4,6 +4,7 @@ import '../util/html-element-props.js'
 import '../style/tangy-common-styles.js'
 import '../style/tangy-element-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { setXapiResultCommon, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-timed`
@@ -269,7 +270,7 @@ class TangyGps extends TangyInputBase {
       }
     };
   }
-
+  
   ready() {
     this.hasDelta = false
     super.ready();
@@ -281,6 +282,29 @@ class TangyGps extends TangyInputBase {
       ? `<label>${this.getAttribute('question-number')}</label>`
       : ''
     this.shadowRoot.querySelector('#label').innerHTML = this.label
+  }
+
+  getXapiStatement() {
+    let result = {};
+    if (this.value && this.value.latitude !== undefined && this.value.longitude !== undefined && this.value.accuracy !== undefined) {
+      result.response = `${this.value.latitude},${this.value.longitude}`;
+      result.extensions = {
+        "http://tangerinecentral.org/xapi/extensions/geolocation": {
+          "latitude": this.value.latitude,
+          "longitude": this.value.longitude,
+          "accuracy": this.value.accuracy
+        }
+      }
+    }
+    setXapiResultCommon(result);
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.OTHER
+        }
+      },
+      result
+    })
   }
 
   disconnectedCallback() {

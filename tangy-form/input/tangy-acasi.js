@@ -2,6 +2,7 @@ import { PolymerElement, html } from '@polymer/polymer/polymer-element.js';
 import '../util/html-element-props.js'
 import '../style/tangy-common-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import {xapiResultFactory, generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE } from '../util/tangy-xapi-utils.js'
 
 /**
  * `tangy-acasi`
@@ -135,7 +136,29 @@ export class TangyAcasi extends TangyInputBase {
       }
     };
   }
-
+  
+  getXapiStatement() {
+    let choices = [];
+    let images = this.getAttribute('images');
+    let imageArray = images && Array.isArray(images.split(",")) ? images.split(",") : [];
+    for (let src of imageArray) {
+      let srcArray = src.split('/')
+      let filename = srcArray[srcArray.length - 1]
+      let name = filename.replace('.png', '')
+        choices.push({
+        id: name
+      })
+    }
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.CHOICE,
+          choices
+        }
+      },
+      result: xapiResultFactory.default(this)
+    })
+  }
 
   // Element class can define custom element reactions
   // @TODO: Duplicating ready?

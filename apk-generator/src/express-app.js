@@ -119,6 +119,7 @@ app.post('/apk-generator/release-apk/:group', releaseAPK)
 app.post('/apk-generator/release-pwa/:group/', releasePWA)
 
 // app.use('/apk-generator/release-online-survey-app/:groupId/:formId/:releaseType/:appName/:uploadKey/', isAuthenticated, releaseOnlineSurveyApp)
+app.use('/apk-generator/release-online-survey-app/:groupId/:formId/:releaseType/:appName/', releaseOnlineSurveyApp)
 app.use('/apk-generator/release-online-survey-app/:groupId/:formId/:releaseType/:appName/:uploadKey/', releaseOnlineSurveyApp)
 
 // app.use('/apk-generator/unrelease-online-survey-app/:groupId/:formId/:releaseType/', isAuthenticated, unreleaseOnlineSurveyApp)

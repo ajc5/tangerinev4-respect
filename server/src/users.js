@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const util = require('util');
 const junk = require('junk');
+const { v4: uuidV4 } = require('uuid');
 const {
   doesUserExist,
   hashPassword,
@@ -17,6 +18,7 @@ const registerUser = async (req, res) => {
       user.isActive = true;
       user.password = await hashPassword(user.password);
       user.groups = [];
+      user.respectToken = uuidV4();
       const data = await USERS_DB.post(user);
       res.send({ statusCode: 200, data: `User registered Successfully` });
       return data;
@@ -33,6 +35,12 @@ const getAllUsers = async (req, res) => {
     .filter(doc => !doc['id'].startsWith('_design'))
     .map(doc => {
       const user = doc['doc'];
+      // Generate respectToken on-the-fly if missing
+      if (!user.respectToken) {
+        user.respectToken = uuidV4();
+        // Fire-and-forget save to avoid blocking the response
+        USERS_DB.put(user).catch(err => log.warn(`Could not save respectToken for ${user.username}: ${err}`));
+      }
       return {
         _id: user._id,
         email: user.email,
@@ -41,6 +49,7 @@ const getAllUsers = async (req, res) => {
         // We should probably create an upgrade path to set and iSActive property to all user documents
         isActive: user.isActive === undefined ? true : user.isActive,
         username: user.username,
+        respectToken: user.respectToken,
       };
     });
   res.send({ statusCode: 200, data });
@@ -183,9 +192,14 @@ const restoreUser = async (req, res) => {
 const findMyUser = async (req, res) => {
   try {
     const user = await findUserByUsername(req.user.name);
-    const { _id, email, firstName, lastName } = user;
+    // Generate respectToken on-the-fly if missing
+    if (!user.respectToken) {
+      user.respectToken = uuidV4();
+      await USERS_DB.put(user);
+    }
+    const { _id, email, firstName, lastName, respectToken } = user;
     res.status(200).send({
-      data: { _id, username: user.username, email, firstName, lastName },
+      data: { _id, username: user.username, email, firstName, lastName, respectToken },
     });
   } catch (error) {
     console.error(error);
@@ -200,9 +214,14 @@ const findOneUserByUsername = async (req, res) => {
       return res.status(500).send({ data: `Could not find User` });
     }
     const user = await findUserByUsername(username);
-    const { _id, email, firstName, lastName, groups } = user;
+    // Generate respectToken on-the-fly if missing
+    if (!user.respectToken) {
+      user.respectToken = uuidV4();
+      await USERS_DB.put(user);
+    }
+    const { _id, email, firstName, lastName, groups, respectToken } = user;
     res.status(200).send({
-      data: { _id, username: user.username, email, firstName, lastName, groups },
+      data: { _id, username: user.username, email, firstName, lastName, groups, respectToken },
     });
   } catch (error) {
     console.error(error);

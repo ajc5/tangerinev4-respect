@@ -5,14 +5,32 @@ const USERS_DB = new DB('users');
 const GROUPS_DB = new DB('groups');
 const { createLoginJWT } = require('./auth-utils');
 const { permissionsList } = require('./permissions-list.js');
+const { v4: uuidV4 } = require('uuid');
+
+// Ensure Mango index for respectToken lookups
+USERS_DB.createIndex({ index: { fields: ['respectToken'] } }).catch(err =>
+  log.warn('Could not create respectToken index: ' + err)
+);
+
 const login = async (req, res) => {
   const { username, password } = req.body;
   try {
     if (await areCredentialsValid(username, password)) {
       const permissions = await getSitewidePermissions(username);
-      const token = createLoginJWT({ username, permissions });
+      const jwtToken = createLoginJWT({ username, permissions });
+      const user = await findUserByUsername(username);
+      // Generate respectToken on-the-fly if missing (handles existing users)
+      // user may be undefined for user1 (superadmin not in the DB)
+      if (user && !user.respectToken) {
+        user.respectToken = uuidV4();
+        await USERS_DB.put(user);
+      }
+      const respectToken = user ? user.respectToken : null;
+      const respectUrl = respectToken
+        ? `${req.protocol}://${req.get('host')}/respect-app-manifest?respectToken=${respectToken}`
+        : null;
       log.info(`${username} login success`);
-      return res.status(200).send({ data: { token } });
+      return res.status(200).send({ data: { token: jwtToken, respectUrl } });
     } else {
       log.info(`${username} login fail`);
       return res.status(401).send({ data: 'Invalid Credentials' });

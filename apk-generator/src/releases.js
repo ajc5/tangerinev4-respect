@@ -88,7 +88,7 @@ const releaseOnlineSurveyApp = async(req, res) => {
 	const formId = sanitize(req.params.formId)
 	const releaseType = sanitize(req.params.releaseType)
 	const appName = sanitize(req.params.appName)
-	const uploadKey = sanitize(req.params.uploadKey)
+	const uploadKey = req.params.uploadKey ? sanitize(req.params.uploadKey) : ''
 
 	try {
 		const cmd = `release-online-survey-app ${groupId} ${formId} ${releaseType} "${appName}" ${uploadKey} `

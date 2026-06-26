@@ -4,6 +4,7 @@ import '@polymer/paper-toggle-button/paper-toggle-button.js'
 import '../style/tangy-common-styles.js'
 import '../style/tangy-element-styles.js'
 import { TangyInputBase } from '../tangy-input-base.js'
+import { getXapiTrueFalseStatement } from '../util/tangy-xapi-utils.js';
 
     /**
      * `tangy-toggle`
@@ -135,6 +136,10 @@ export class TangyToggle extends TangyInputBase {
         reflectToAttribute: true
       }
     }
+  }
+
+  getXapiStatement() {
+    return getXapiTrueFalseStatement(this);
   }
 
   connectedCallback () {

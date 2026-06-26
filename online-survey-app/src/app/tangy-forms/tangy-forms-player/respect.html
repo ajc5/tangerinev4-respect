@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, minimum-scale=1, initial-scale=1, user-scalable=yes">
+
+    <title>tangy-form demo</title>
+
+    <script src="../node_modules/@webcomponents/webcomponentsjs/webcomponents-loader.js"></script>
+    <script src="../node_modules/redux/dist/redux.min.js"></script>
+
+    <!-- Loading screen styles - critical, must load before content -->
+    <style>
+      body.loading {
+        overflow: hidden;
+      }
+      #loading-spinner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.3s ease-out;
+      }
+      #loading-spinner.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3c5b8d;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+
+    <script type="module">
+      import '@polymer/iron-demo-helpers/demo-pages-shared-styles';
+      import '@polymer/iron-demo-helpers/demo-snippet';
+    </script>
+    <custom-style>
+      <style>
+        html {
+          --document-background-color: #FAFAFA;
+          --primary-color-dark: #3c5b8d;
+          --primary-text-color: var(--light-theme-text-color);
+          --primary-color: #3c5b8d;
+          --accent-color: #f26f10;
+          --accent-text-color: #FFF;
+          --error-color: var(--paper-red-500);
+          --warn-color: #993f0b;
+          --warn-background-color: #f4e688;
+          --disabled-color: #BBB;
+        }
+        body {
+          font-size: clamp(14px, 1.2vw + 0.6rem, 18px);
+          line-height: 1.45;
+        }
+        h1, h2, h3, h4, h5 {
+          @apply --paper-font-common-base;
+          color: var(--primary-text-color);
+          margin: 25px 0px 5px 15px;
+        }
+        h1 { font-size: clamp(22px, 2vw + 1rem, 34px); }
+        h2 { font-size: clamp(20px, 1.6vw + 0.9rem, 30px); }
+        h3 { font-size: clamp(16px, 1.1vw + 0.8rem, 22px); }
+        h4 { font-size: clamp(15px, 1vw + 0.7rem, 20px); }
+        h5 { font-size: clamp(14px, 0.9vw + 0.6rem, 18px); }
+        /* accordion behavior: hide demo snippets by default */
+        .vertical-section-container > demo-snippet {
+          display: none;
+          --demo-snippet-code: {
+            display: none;
+          };
+        }
+        /* clickable row styling for form titles */
+        .vertical-section-container > h3 {
+          cursor: pointer;
+          padding: 10px 15px;
+          margin: 0 0 6px 0;
+          background: #dbeafe;
+          border-bottom: 1px solid #c9ddf5;
+          transition: background-color 0.2s;
+        }
+        .vertical-section-container > h3:hover {
+          background: #cfe2fb;
+        }
+        .vertical-section-container > h3.selected {
+          background: #bcd5f7;
+          font-weight: bold;
+        }
+        #list-back-button {
+          cursor: pointer;
+        }
+        /* LRS table styling: grey key column, white value column */
+        #lrs-info-table td:nth-child(2) {
+          background: #ffffff;
+        }
+        #lrs-info {
+          font-size: clamp(13px, 1vw + 0.6rem, 16px);
+        }
+        #lrs-info strong {
+          display: block;
+          font-size: clamp(14px, 1.1vw + 0.7rem, 18px);
+          margin-bottom: 4px;
+        }
+        #lrs-info-table th,
+        #lrs-info-table td {
+          font-size: clamp(12px, 0.9vw + 0.6rem, 16px);
+          padding: 6px 8px;
+          vertical-align: top;
+          word-break: break-word;
+        }
+        #lrs-info-table th:first-child,
+        #lrs-info-table td:first-child {
+          width: 1%;
+          max-width: max-content;
+          white-space: nowrap;
+        }
+        #lrs-info-table th:last-child,
+        #lrs-info-table td:last-child {
+          width: 99%;
+          min-width: 0;
+        }
+        @media (max-width: 720px) {
+          .vertical-section-container {
+            padding: 0 8px;
+          }
+          #lrs-info {
+            margin: 10px 0;
+          }
+          #lrs-info-table {
+            display: block;
+            width: 100%;
+            overflow-x: auto;
+          }
+          #lrs-info-table thead {
+            font-size: clamp(11px, 0.8vw + 0.6rem, 14px);
+          }
+          #lrs-info-table th {
+            font-size: inherit;
+            padding: 4px 6px;
+          }
+          #lrs-info-table td:nth-child(2) {
+            display: block;
+            max-width: 100%;
+            overflow-x: auto;
+            white-space: nowrap;
+          }
+        }
+      </style>
+    </custom-style>
+    <script type="module" src="../tangy-form.js"></script>
+    <script type="module" src="../input/tangy-acasi.js"></script>
+    <script type="module" src="../input/tangy-audio-recording.js"></script>
+    <script type="module" src="../input/tangy-box.js"></script>
+    <script type="module" src="../input/tangy-checkbox.js"></script>
+    <script type="module" src="../input/tangy-checkboxes.js"></script>
+    <script type="module" src="../input/tangy-checkboxes-dynamic.js"></script>
+    <script type="module" src="../input/tangy-consent.js"></script>
+    <script type="module" src="../input/tangy-eftouch.js"></script>
+    <script type="module" src="../input/tangy-ethio-date.js"></script>
+    <script type="module" src="../input/tangy-gps.js"></script>
+    <script type="module" src="../input/tangy-input.js"></script>
+    <script type="module" src="../input/tangy-keyboard-input.js"></script>
+    <script type="module" src="../input/tangy-location.js"></script>
+    <script type="module" src="../input/tangy-radio-button.js"></script>
+    <script type="module" src="../input/tangy-radio-buttons.js"></script>
+    <script type="module" src="../input/tangy-radio-block.js"></script>
+    <script type="module" src="../input/tangy-radio-blocks.js"></script>
+    <script type="module" src="../input/tangy-select.js"></script>
+    <script type="module" src="../input/tangy-timed.js"></script>
+    <script type="module" src="../input/tangy-untimed-grid.js"></script>
+    <script type="module" src="../input/tangy-toggle.js"></script>
+    <script type="module" src="../input/tangy-toggle-button.js"></script>
+    <script type="module" src="../input/tangy-partial-date.js"></script>
+    <script type="module" src="../input/tangy-photo-capture.js"></script>
+    <script type="module" src="../input/tangy-video-capture.js"></script>
+    <script type="module" src="../input/tangy-qr.js"></script>
+    <script type="module" src="../input/tangy-signature.js"></script>
+
+    <!-- xAPI initialization: read launch parameters and configure wrapper -->
+    <script type="module">
+      import { XAPIWrapper } from './xapi-wrapper.js';
+
+      const urlParams = new URLSearchParams(window.location.search);
+      window.launch = {};
+      for (const [key, value] of urlParams.entries()) {
+        if (key === 'endpoint' || key === 'auth' || key === 'actor' || key === 'registration') {
+          try {
+            launch[key] = JSON.parse(value);
+          } catch (e) {
+            launch[key] = value;
+          }
+        }
+      }
+      launch.registration = launch.registration ? launch.registration : (function uuid() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8);
+          return v.toString(16);
+        });
+      })();
+      launch.activity_id = "form-1";
+      launch.grouping = "group-1";
+      let hasLRSConfig = launch.endpoint && launch.auth;
+
+      if (hasLRSConfig) {
+        ADL.XAPIWrapper.changeConfig({
+          endpoint: launch.endpoint,
+          auth: launch.auth,
+        });
+      }
+      if (hasLRSConfig) {
+        const box = document.getElementById('lrs-info');
+        const tbody = document.querySelector('#lrs-info-table tbody');
+        box.style.display = 'block';
+        // clear previous rows
+        tbody.innerHTML = '';
+        for (const [key, value] of Object.entries(launch)) {
+          const row = document.createElement('tr');
+          const kcell = document.createElement('td');
+          kcell.textContent = key;
+          kcell.style.borderBottom = '1px solid #ddd';
+          const vcell = document.createElement('td');
+          // pretty-print objects
+          vcell.textContent = (typeof value === 'object' && value !== null)
+            ? JSON.stringify(value)
+            : value;
+          vcell.style.borderBottom = '1px solid #ddd';
+          row.appendChild(kcell);
+          row.appendChild(vcell);
+          tbody.appendChild(row);
+        }
+      }
+    </script>
+
+    <!-- ADL wrapper so submission uses the same code as xapi-test.html -->
+    <script src="./xapiwrapper.min.js"></script>
+
+    <custom-style>
+      <style is="custom-style" include="demo-pages-shared-styles">
+      </style>
+    </custom-style>
+  </head>
+  <body class="loading">
+    <!-- Loading spinner overlay -->
+    <div id="loading-spinner">
+      <div class="spinner"></div>
+    </div>
+
+    <div class="vertical-section-container centered">
+
+      <!-- LRS configuration display -->
+      <div id="lrs-info" style="padding:10px;background:#f0f0f0;border:1px solid #ccc;margin:10px;display:none;">
+        <strong>LRS Configuration (<a href="https://test.gblrs.com/Reports" target="_blank">View xAPI Statements</a>)</strong>
+        <table id="lrs-info-table" style="width:100%;border-collapse:collapse;margin-top:5px;">
+          <thead><tr><th style="text-align:left;border-bottom:1px solid #999;">Key</th><th style="text-align:left;border-bottom:1px solid #999;">Value</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <h3>Tangy Input Types Demo</h3>
+
+      <demo-snippet>
+        <template>
+          <tangy-form id="input-types-form" title="Input Types Form">
+            <tangy-form-item id="section-1">
+              
+              <tangy-input name="text" label="Text Input - What is your name?"></tangy-input>
+              <tangy-input type="email" name="email" label="Email Input - What is your email?"></tangy-input>
+              <tangy-input type="number" name="number" label="Number Input - What is your age (years)?"></tangy-input>
+              <tangy-input type="date" name="date" label="Date Input - What is your birth date?"></tangy-input>
+              <tangy-input type="time" name="time" label="Time Input - What time does school start?"></tangy-input>
+              
+              <tangy-partial-date name="partialDate"
+                label="Month/Year (partial date)"
+                future-date-error-text="No future dates are allowed"
+                min-year="2019"
+                max-year="2021"
+                allow-unknown-day>
+              </tangy-partial-date>
+              <tangy-ethio-date 
+                name="ethioDate" 
+                class="" 
+                style="" 
+                question-number="" 
+                label="Enter a date (ethiopian date):" 
+                min-year="2010" 
+                max-year="2030" 
+                allow-unknown-day 
+                allow-unknown-month 
+                allow-unknown-year>
+              </tangy-ethio-date>
+              <tangy-keyboard-input
+                name="keyboard"
+                keys="a e i o u h t g"
+                label="Create a word">
+              </tangy-keyboard-input>
+              <tangy-qr 
+                name="qrCode"
+                label="Scan a QR code"
+                hint-text="This is <b>hint text</b>.">
+              </tangy-qr>
+
+              <tangy-radio-blocks
+                name="radioBlocks"
+                label="Effects of heatstroke?">
+                <option value="anone" >None</option>
+                <option value="amild"  >Mild</option>
+                <option value="amedium" correct >Medium</option>
+                <option value="asevere" correct >Severe</option>
+              </tangy-radio-blocks>
+
+              <tangy-radio-buttons
+                name="radioButtons"
+                label="What is your <b>favorite</b> fruit?"
+                hint-text="This is <b>hint text</b>.">
+                <option value="xoorange">Orange</option>
+                <option value="xobanana" correct>Banana</option>
+                <option value="xotangerine" correct>Tangerine</option>
+              </tangy-radio-buttons>
+
+              <tangy-select name="select"
+                label="What is your <b>second favorite</b> fruit?"
+                hint-text="This is <b>hint text</b>.">
+                <option name=""></option>
+                <option name="qorange">Orange</option>
+                <option name="qbanana">Banana</option>
+                <option name="qtangerine"><b>Tangerine</b></option>
+              </tangy-select>
+
+              <tangy-checkboxes name="checkboxGroup" question-number="" label="Best seasons of the year?" hint-text="" error-text="" warn-text="" class="" style="" at-least="0" incomplete="" discrepancy-text="">        
+                <option value="aspring">Spring</option>
+                <option value="asummer">Summer</option>
+                <option value="awinter" >Winter</option>
+                <option value="aautumn" >Autumn</option>
+              </tangy-checkboxes>
+
+             
+              Where do you eat fruit?
+              <tangy-location
+                name="location"
+                location-src="./location-list.json"
+                hint-text="This is <b>hint text</b>."
+                show-levels="county,school">
+              </tangy-location>
+
+              <tangy-acasi 
+                images="../demo/assets/images/never.png,../demo/assets/images/once.png,../demo/assets/images/few.png,../demo/assets/images/many.png,../demo/assets/images/dont_know.png" 
+                introsrc="../demo/assets/sounds/1.mp3" 
+                name="acasi">
+              </tangy-acasi>
+
+              Touch the cat and dog.
+              <br>
+              <tangy-eftouch 
+                input-sound="assets/sounds/pop.mp3" 
+                multi-select="2"
+                transition-delay=100 
+                auto-progress
+                name="eftouch">
+                <option width=33 height=33 value="blank"></option>
+                <option width=33 height=33 correct src="assets/images/cat.png" value="cat"></option>
+                <option width=33 height=33 correct src="assets/images/dog.png" value="dog"></option>
+
+                <option width=33 height=33 src="assets/images/pig.png" value="pig"></option>
+                <option width=33 height=33 src="assets/images/turtle.png" value="turtle"></option>
+                <option width=33 height=33 src="assets/images/cow.png" value="cow"></option>
+
+                <option width=33 height=33 value="blank"></option>
+                <option width=33 height=33 src="assets/images/fish.png" value="fish"></option>
+                <option width=33 height=33 src="assets/images/bird.png" value="bird"></option>
+              </tangy-eftouch>
+              
+              <tangy-untimed-grid name="untimedGrid" error-text="" warn-text="" class="" style="" hint-text="" columns="4" option-font-size="0.7" auto-stop="3" incomplete="" score-target="0" score-baseline="0" score-spread="0">
+                <option value="1">aaa</option>
+                <option value="2">bb</option>
+                <option value="3">c</option>
+              </tangy-untimed-grid>
+              <tangy-timed hint-text="" columns="4" name="timedGrid" error-text="" warn-text="" class="" style="" duration="60" auto-stop="2" show-labels="" option-font-size="0.7" incomplete="" start-time="0" end-time="0" score-target="0" score-baseline="0" score-spread="0" time-remaining="60">
+                <option value="1">aa</option>
+                <option value="2">b</option>
+                <option value="3">ccc</option>      
+              </tangy-timed>
+
+
+              <tangy-checkbox name="checkbox">
+                Public transport is accessible
+              </tangy-checkbox>
+              <tangy-consent 
+                name="consentInput" 
+                prompt="The Institute of Curriculum Development is carrying out a Monitoring Survey..." 
+                confirm-no="true">
+              </tangy-consent>
+              <tangy-toggle-button name="toggleButtonInput" label="Accept terms">
+                I agree to terms
+              </tangy-toggle-button>
+              <tangy-toggle name="toggleInput" label="Accept terms">
+              </tangy-toggle>
+
+              <tangy-photo-capture name="photoCapture" compression="0.10" max-size-in-kb=2000></tangy-photo-capture>
+              <tangy-video-capture name="videoCapture" label="Take a video" ></tangy-video-capture>
+              <tangy-audio-recording
+                name="audioRecording"
+                label="Record a voice note">
+              </tangy-audio-recording>
+
+              <tangy-signature name="signature" class="" style=""></tangy-signature>
+              
+              tangy-gps with hide-coordinates and hide-accuracy-distance:
+              <tangy-gps
+                name="gps"
+                hint-text="This is <b>hint text</b>.">
+              </tangy-gps>
+              
+              <tangy-input-groups initial-count="2" name="inputGroups">
+                <tangy-input name="first_name" label="First name"></tangy-input>
+                <tangy-input name="last_name" label="Last name"></tangy-input>
+              </tangy-input-groups>
+              
+            </tangy-form-item>
+            <tangy-form-item id="section-2">
+              <tangy-input name="text2" label="What is your last name?"></tangy-input>
+            </tangy-form-item>
+          </tangy-form>
+        </template>
+      </demo-snippet>
+        
+    </div>
+
+    <script>
+      // Attach submit listener to ALL tangy-form elements on the page
+      // This runs after all forms are rendered
+      document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('tangy-form').forEach(form => {
+          form.addEventListener('submit', event => {
+            // By default, the form response is locked and the user can browse it. Use event.preventDefault()
+            // to do something else.
+            event.preventDefault();
+            // 3 ways to inspect the user's response to the form. Ordered by level of detail.
+            console.log(event.target);
+            console.log(event.target.response);
+            console.log(event.target.inputs);
+            console.log(event.target.values);
+
+            let statements = [];
+            const inputs = event.target.inputs || [];
+            if (inputs.length > 0 && launch && launch.registration) {
+              inputs.forEach(inp => {
+                if (inp.xapiStatement && typeof inp.xapiStatement === 'object') {
+                  inp.xapiStatement.context.registration = launch.registration;
+                  statements.push(inp.xapiStatement);
+                }
+              });
+            }
+            if (statements.length === 0) return;
+            try {
+              const res = ADL.XAPIWrapper.sendStatements(statements);
+              console.log('xAPI submit results', res, statements);
+            } catch (e) {
+              console.warn('failed sending xAPI submit statements', e);
+            }
+          });
+        });
+      });
+    </script>
+
+    <!-- Responsive back button styles -->
+    <style>
+      #list-back-button {
+        display: none;
+        padding: clamp(8px, 2vw, 12px) clamp(12px, 3vw, 16px);
+        font-size: clamp(14px, 1.2vw + 0.5rem, 18px);
+        margin: clamp(8px, 2vw, 12px) clamp(12px, 2vw, 16px);
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background-color 0.2s ease, transform 0.1s ease;
+        touch-action: manipulation;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+      }
+      #list-back-button:active {
+        transform: scale(0.98);
+        background-color: var(--primary-color-dark, #2a4166);
+      }
+      #list-back-button:hover {
+        background-color: var(--primary-color-dark, #2a4166);
+      }
+      @media (max-width: 600px) {
+        #list-back-button {
+          width: 100%;
+          max-width: calc(100% - 2 * clamp(12px, 2vw, 16px));
+          margin: clamp(8px, 2vw, 12px) auto;
+        }
+      }
+    </style>
+
+    <!-- simple accordion with list header and back button -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const container = document.querySelector('.vertical-section-container');
+        if (container) {
+          // insert title and back button just after the LRS info box
+          const lrsBox = document.getElementById('lrs-info');
+          const title = document.createElement('h2');
+          title.id = 'forms-list-title';
+          title.textContent = 'Forms';
+          title.style.margin = '15px';
+
+          const back = document.createElement('button');
+          back.id = 'list-back-button';
+          back.textContent = '← Back';
+          back.type = 'button';
+
+          if (lrsBox && container.contains(lrsBox)) {
+            container.insertBefore(title, lrsBox.nextSibling);
+            container.insertBefore(back, title.nextSibling);
+          } else {
+            container.insertBefore(title, container.firstChild);
+            container.insertBefore(back, title.nextSibling);
+          }
+        }
+
+        const headings = document.querySelectorAll('.vertical-section-container > h3');
+        let currentOpen = null;
+
+        // Function to toggle form open/closed state
+        function toggleForm(h3, shouldOpen) {
+          const next = h3.nextElementSibling;
+          if (!next || next.tagName !== 'DEMO-SNIPPET') return;
+
+          if (shouldOpen === undefined) {
+            shouldOpen = (next.style.display === 'none' || next.style.display === '');
+          }
+
+          if (shouldOpen) {
+            // open this one
+            next.style.display = 'block';
+            h3.classList.add('selected');
+            // hide other headings
+            headings.forEach(o => { if (o !== h3) o.style.display = 'none'; });
+            document.getElementById('list-back-button').style.display = 'inline-block';
+            currentOpen = h3;
+          } else {
+            // closing current
+            next.style.display = 'none';
+            h3.classList.remove('selected');
+            headings.forEach(o => { o.style.display = 'block'; });
+            document.getElementById('list-back-button').style.display = 'none';
+            currentOpen = null;
+          }
+        }
+
+        // Back button click handler - directly execute close logic
+        document.getElementById('list-back-button').addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (currentOpen) {
+            toggleForm(currentOpen, false);
+          }
+        });
+
+        // H3 heading click handlers
+        headings.forEach(h3 => {
+          h3.style.cursor = 'pointer';
+          h3.addEventListener('click', () => {
+            toggleForm(h3);
+          });
+        });
+
+        // Open the first demo section by default
+        if (headings.length > 0) {
+          toggleForm(headings[0], true);
+        }
+      });
+    </script>
+
+    <!-- Hide loading spinner once page is fully loaded -->
+    <script>
+      function hideLoadingSpinner() {
+        const spinner = document.getElementById('loading-spinner');
+        const body = document.body;
+        if (spinner) {
+          spinner.classList.add('hide');
+          // Remove loading class after animation completes
+          setTimeout(() => {
+            body.classList.remove('loading');
+            spinner.style.display = 'none';
+          }, 300);
+        }
+      }
+
+      // Wait for DOM and web components to be ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          // Give web components a moment to fully initialize
+          setTimeout(hideLoadingSpinner, 500);
+        });
+      } else {
+        // If this script runs after DOMContentLoaded
+        setTimeout(hideLoadingSpinner, 500);
+      }
+
+      // Also hide on window load to be safe
+      window.addEventListener('load', hideLoadingSpinner);
+    </script>
+  </body>
+</html>

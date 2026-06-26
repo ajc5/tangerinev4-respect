@@ -28,7 +28,9 @@
               "src/tangerine-theme.scss",
               "src/styles.scss"
             ],
-            "scripts": []
+            "scripts": [
+              "src/assets/xapiwrapper.min.js"
+            ]
           },
           "configurations": {
             "production": {

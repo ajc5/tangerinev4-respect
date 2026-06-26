@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { FormsService } from 'src/app/shared/_services/forms-service.service';
 import { CaseService } from 'src/app/case/services/case.service';
 import { TangyFormService } from '../tangy-form.service';
+declare const ADL: any;
 
 const sleep = (milliseconds) => new Promise((res) => setTimeout(() => res(true), milliseconds))
 
@@ -21,6 +22,20 @@ export class TangyFormsPlayerComponent implements OnInit {
   @Input('skipSaving') skipSaving = false
   @Input('preventSubmit') preventSubmit = false
   @Input('metadata') metadata:any
+
+  // LRS configuration for sending xAPI statements on form submission
+  @Input('lrsEndpoint') lrsEndpoint: string
+  @Input('lrsAuth') lrsAuth: string
+
+  // Optional registration UUID from URL params (like respect.html)
+  private lrsRegistration: string
+
+  // xAPI debug info to display in the UI
+  xapiDebugInfo = {
+    endpoint: '',
+    auth: '',
+    registration: '',
+  }
 
   formId: string;
   formResponseId: string;
@@ -51,6 +66,9 @@ export class TangyFormsPlayerComponent implements OnInit {
 
   async ngOnInit(): Promise<any> {
     this.window = window;
+
+    // Parse xAPI launch parameters from URL query string (like respect.html)
+    this.populateXapiFromUrlParams();
 
     // Loading the formResponse from a case must happen before rendering the innerHTML
     let formResponse;
@@ -124,6 +142,8 @@ export class TangyFormsPlayerComponent implements OnInit {
           this.caseService.markEventFormComplete(this.caseService.caseEvent.id, this.caseService.eventForm.id)
           await this.caseService.save()
         }
+        // Send xAPI statements to LRS if configured
+        await this.sendXapiStatements(event.target);
         if (window['eventFormRedirect']) {
           try {
             // this.router.navigateByUrl(window['eventFormRedirect']) -- TODO figure this out later
@@ -141,6 +161,8 @@ export class TangyFormsPlayerComponent implements OnInit {
         event.preventDefault();
         try {
           if (await this.formsService.uploadFormResponse(event.target.response)){
+            // Send xAPI statements to LRS if configured
+            await this.sendXapiStatements(event.target);
             this.router.navigate(['/form-submitted-success']);
           } else {
             alert('Form could not be submitted. Please retry');
@@ -152,6 +174,52 @@ export class TangyFormsPlayerComponent implements OnInit {
     }
   }
 
+
+  /**
+   * Populate LRS configuration from URL query parameters (endpoint, auth, actor, registration).
+   * Similar to the launch parameter parsing in respect.html.
+   * Values can be JSON-encoded objects/strings; fall back to raw string if parsing fails.
+   */
+  private populateXapiFromUrlParams(): void {
+    console.log('[xAPI Debug] Checking URL query parameters:', window.location.search);
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    // Helper to parse a parameter value, trying JSON.parse first (like respect.html)
+    const parseParam = (value: string): any => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    };
+
+    // Override endpoint and auth from URL if not already provided via @Input
+    if (urlParams.has('endpoint')) {
+      this.lrsEndpoint = parseParam(urlParams.get('endpoint')) as string;
+      this.xapiDebugInfo.endpoint = this.lrsEndpoint;
+      console.log('[xAPI Debug] Endpoint from URL:', this.lrsEndpoint);
+    }
+    if (urlParams.has('auth')) {
+      this.lrsAuth = parseParam(urlParams.get('auth')) as string;
+      this.xapiDebugInfo.auth = this.lrsAuth;
+      console.log('[xAPI Debug] Auth from URL:', this.lrsAuth);
+    }
+    
+    // Use a provided registration, or leave undefined so generateUUID is used
+    if (urlParams.has('registration')) {
+      this.lrsRegistration = parseParam(urlParams.get('registration')) as string;
+      this.xapiDebugInfo.registration = this.lrsRegistration;
+      console.log('[xAPI Debug] Registration from URL:', this.lrsRegistration);
+    }
+    
+    // Also capture @Input values if set (in case they're set but URL params are not)
+    if (this.lrsEndpoint && !this.xapiDebugInfo.endpoint) this.xapiDebugInfo.endpoint = this.lrsEndpoint;
+    if (this.lrsAuth && !this.xapiDebugInfo.auth) this.xapiDebugInfo.auth = this.lrsAuth;
+    
+    if (!urlParams.has('endpoint') && !urlParams.has('auth') && !urlParams.has('registration')) {
+      console.log('[xAPI Debug] No xAPI URL parameters found. Using @Input values if provided.');
+    }
+  }
 
   // Prevent parallel saves which leads to race conditions. Only save the first and then last state of the store.
   // Everything else in between we can ignore.
@@ -204,5 +272,71 @@ export class TangyFormsPlayerComponent implements OnInit {
       console.error(error);
     }
   }
+
+  /**
+   * Collect xAPI statements from form inputs and send them all in a single batch request to the LRS.
+   * This follows the pattern from respect.html which uses sendStatements with an array.
+   */
+  private async sendXapiStatements(formElement: any): Promise<void> {
+    console.log('[xAPI Debug] sendXapiStatements called');
+    
+    // Skip if LRS is not configured
+    if (!this.lrsEndpoint || !this.lrsAuth) {
+      console.log('[xAPI Debug] Skipping – no endpoint/auth configured. endpoint:', this.lrsEndpoint, 'auth:', this.lrsAuth);
+      return;
+    }
+
+    const inputs = formElement.inputs || [];
+    if (inputs.length === 0) {
+      console.log('[xAPI Debug] No inputs found on form element');
+      return;
+    }
+
+    // Use the registration from URL params, or generate a new one for this submission
+    const registration = this.lrsRegistration || this.generateUUID();
+    console.log('[xAPI Debug] Using registration:', registration);
+
+    // Collect all statements from inputs that have xapiStatement data
+    const statements = [];
+    for (const input of inputs) {
+      if (input.xapiStatement && typeof input.xapiStatement === 'object') {
+        // Set the registration on the statement's context, following the respect.html pattern
+        input.xapiStatement.context = input.xapiStatement.context || {};
+        input.xapiStatement.context.registration = registration;
+        statements.push(input.xapiStatement);
+      }
+    }
+
+    if (statements.length === 0) {
+      console.log('[xAPI Debug] No inputs with xapiStatement property found');
+      return;
+    }
+
+    console.log('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
+    console.log('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
+
+    // Configure ADL wrapper (same as in respect.html)
+    ADL.XAPIWrapper.changeConfig({
+      endpoint: this.lrsEndpoint,
+      auth: this.lrsAuth
+    });
+
+    try {
+      // Use ADL.XAPIWrapper.sendStatements (same as respect.html)
+      const res = ADL.XAPIWrapper.sendStatements(statements);
+      console.log('[xAPI Debug] Submission result:', res, statements);
+    } catch (error) {
+      console.error('[xAPI Debug] Submission failed:', error);
+    }
+  }
+
+  private generateUUID(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
 
 }

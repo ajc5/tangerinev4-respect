@@ -5,6 +5,7 @@ import '../style/tangy-element-styles.js'
 import '@polymer/iron-icon/iron-icon.js'
 import '@polymer/paper-button/paper-button.js'
 import {TangyInputBase} from '../tangy-input-base.js'
+import { getXapiMediaStatement } from '../util/tangy-xapi-utils.js';
 
 /**
  * `tangy-video-capture`
@@ -336,6 +337,10 @@ export class TangyVideoCapture extends TangyInputBase {
             console.log('MediaRecorder started', this.mediaRecorder);
         }
     }
+    
+    getXapiStatement() {
+        return getXapiMediaStatement(this);
+    }
 
     connectedCallback() {
         super.connectedCallback()
@@ -428,18 +433,35 @@ export class TangyVideoCapture extends TangyInputBase {
 
     onInvalidChange(value) {
         this.shadowRoot.querySelector('#error-text').innerHTML = this.invalid
-            ? `<iron-icon icon="error"></iron-icon> <div> ${this.hasAttribute('error-text') ? this.getAttribute('error-text') : ''} </div>`
+            ? `<iron-icon icon="error"></iron-icon>
+               <div> ${this.hasAttribute('error-text') ? this.getAttribute('error-text') : this.errorText } </div>`
             : ''
     }
 
     validate() {
+        if (this.recording) {
+            this.errorText = t('Stop the recording before continuing'); // do this before setting invalid to true
+            this.invalid = true
+            return false;
+        }
         if (this.hasAttribute('required') && !this.value) {
+            this.errorText = t("Recording is required"); // do this before setting invalid to true
             this.invalid = true
             return false
         } else {
+            this.errorText = "";
             this.invalid = false
             return true
         }
+    }
+
+    validate_back() {
+        if (this.recording) {
+            this.errorText = t('Stop the recording before continuing'); // do this before setting invalid to true
+            this.invalid = true
+            return false;
+        }
+        return true;
     }
 
     disableButtons(ids) {

@@ -12,7 +12,8 @@ import { _TRANSLATE } from 'src/app/shared/_services/translation-marker';
 export class ManageUsersComponent implements OnInit {
   activeUsers;
   archivedUsers;
-  usersDisplayedColumns = ['username', 'email', 'actions']
+  usersDisplayedColumns = ['username', 'email', 'publicAccessUrl', 'actions'];
+  baseUrl = window.location.origin;
 
   constructor(
     private userService: UserService,
@@ -65,6 +66,16 @@ export class ManageUsersComponent implements OnInit {
     } catch (error) {
       this.errorHandler.handleError(_TRANSLATE('Could not restore user'));
     }
+  }
+
+  copyOpdsUrl(user) {
+    if (!user.respectToken) return;
+    const url = `${this.baseUrl}/respect-app-manifest?respectToken=${user.respectToken}`;
+    navigator.clipboard.writeText(url).then(() => {
+      this.errorHandler.handleError(_TRANSLATE('RESPECT Link copied to clipboard'));
+    }).catch(() => {
+      this.errorHandler.handleError(_TRANSLATE('Failed to copy link'));
+    });
   }
 
 }
