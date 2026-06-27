@@ -29,7 +29,7 @@
               "src/styles.scss"
             ],
             "scripts": [
-              "src/assets/xapiwrapper.min.js"
+              "src/scripts/xapiwrapper.min.js"
             ]
           },
           "configurations": {
