@@ -1,0 +1,7 @@
+FROM couchdb:3
+
+COPY couchdb/local.ini /opt/couchdb/etc/local.ini
+
+VOLUME /opt/couchdb/data
+
+EXPOSE 5984

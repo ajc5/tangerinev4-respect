@@ -1,0 +1,113 @@
+# ============================================================
+# STAGE 1: Build Angular apps (client, online-survey, PWA tools)
+# ============================================================
+FROM node:18-alpine AS angular-builder
+
+RUN apk add --no-cache git git-lfs bash && \
+    git lfs install && \
+    git config --global url."https://".insteadOf git://
+
+WORKDIR /build
+
+# ---------- Client ----------
+COPY client/package.json client/
+RUN cd client && npm install
+
+COPY client/ /build/client/
+RUN cd client && ./node_modules/.bin/ng build --base-href "./" -c production
+
+# ---------- PWA Tools ----------
+COPY client/pwa-tools/ /build/client/pwa-tools/
+RUN cd client/pwa-tools/updater-app && \
+    npm install && \
+    ./node_modules/.bin/bower install --allow-root && \
+    npm run build && \
+    cp logo.svg build/default/
+
+# Package APK sources
+RUN mkdir -p client/builds/apk/www && \
+    cp -r client/dist/tangerine-client client/builds/apk/www/shell && \
+    mkdir -p client/builds/pwa && \
+    cp -r client/pwa-tools/updater-app/build/default client/builds/pwa && \
+    mkdir client/builds/pwa/release-uuid && \
+    cp -r client/dist/tangerine-client client/builds/pwa/release-uuid/app
+
+# Fix module links for APK
+RUN sed -i 's/type="module"/type="text\/javascript"/g' /build/client/builds/apk/www/shell/index.html
+
+# ---------- Tangy Form ----------
+COPY tangy-form/ /build/tangy-form/
+RUN cd /build/tangy-form && npm install
+
+# ============================================================
+# STAGE 2: Cordova + Android SDK setup
+# ============================================================
+FROM alvrme/alpine-android:android-32-jdk11 AS cordova-builder
+
+RUN apk add --update nodejs npm bash vim curl wget jq git tar unzip gradle
+
+RUN npm update && npm install -g cordova@11.0.0
+
+WORKDIR /cordova
+COPY cordova/ ./
+RUN cordova platform add android@11 && \
+    cordova plugin add cordova-plugin-geolocation@4.1.0 && \
+    cordova plugin add cordova-plugin-camera@6.0.0 && \
+    cordova plugin add cordova-plugin-file@7.0.0 && \
+    cordova plugin add cordova-plugin-androidx && \
+    cordova plugin add cordova-plugin-androidx-adapter && \
+    cordova plugin add github:Tangerine-Community/cordova-hot-code-push && \
+    cordova plugin add cordova-plugin-nearby-connections@0.6.1 && \
+    cordova plugin add cordova-sms-plugin && \
+    cordova plugin add cordova-plugin-android-permissions && \
+    cordova plugin add github:brodybits/cordova-plugin-sqlcipher-crypto-batch-connection-manager-core-pro-free#unstable-build-2020-07-15-01 && \
+    cordova plugin add cordova-sqlite-storage-file && \
+    cordova plugin add cordova-plugin-x-socialsharing
+
+# ============================================================
+# STAGE 3: Final APK Generator image
+# ============================================================
+FROM alvrme/alpine-android:android-32-jdk11
+
+RUN apk add --no-cache nodejs npm bash vim curl wget jq git tar unzip gradle && \
+    npm update && npm install -g cordova@11.0.0
+
+RUN mkdir -p /tangerine \
+    /tangerine/client/builds/apk \
+    /tangerine/client/dist \
+    /tangerine/client/releases
+
+# ---------- Copy Cordova setup from Stage 2 ----------
+COPY --from=cordova-builder /cordova /tangerine/client/builds/apk
+
+# ---------- Copy built client from Stage 1 ----------
+COPY --from=angular-builder /build/client/dist /tangerine/client/dist
+COPY --from=angular-builder /build/client/builds /tangerine/client/builds
+COPY --from=angular-builder /build/client/pwa-tools /tangerine/client/pwa-tools
+
+# ---------- Install APK generator dependencies ----------
+COPY apk-generator/package.json /tangerine/apk-generator/
+RUN cd /tangerine/apk-generator && npm install
+
+# ---------- Copy APK generator source ----------
+COPY apk-generator/ /tangerine/apk-generator/
+RUN cd /tangerine/apk-generator && npm link
+
+# ---------- Online Survey App (for release) ----------
+COPY online-survey-app/package.json /tangerine/online-survey-app/
+RUN cd /tangerine/online-survey-app && npm install
+COPY online-survey-app/ /tangerine/online-survey-app/
+
+# ---------- Tangy Form ----------
+COPY --from=angular-builder /build/tangy-form /tangerine/tangy-form/
+
+# Build TypeScript for production
+RUN cd /tangerine/apk-generator && npm run build
+
+# ---------- Default environment variables ----------
+ENV T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/
+
+WORKDIR /tangerine/apk-generator
+EXPOSE 80
+
+CMD ["npm", "run", "start:prod"]

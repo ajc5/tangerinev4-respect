@@ -1,0 +1,122 @@
+version: "3.8"
+
+services:
+  couchdb:
+    image: ${IMAGE_PREFIX:-tangerine}/tangerine-couchdb:${T_TAG:-latest}
+    container_name: tangerine-couchdb
+    build:
+      context: ..
+      dockerfile: dockerhub/Dockerfile.couchdb
+    restart: unless-stopped
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://admin:password@localhost:5984/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    image: ${IMAGE_PREFIX:-tangerine}/tangerine-server:${T_TAG:-latest}
+    container_name: tangerine-server
+    build:
+      context: ..
+      dockerfile: dockerhub/Dockerfile.server
+    restart: unless-stopped
+    depends_on:
+      couchdb:
+        condition: service_healthy
+    environment:
+      - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
+      - T_USER1=${T_USER1:-user1}
+      - T_USER1_PASSWORD=${T_USER1_PASSWORD:-password}
+      - T_ADMIN=${T_COUCHDB_USER_ADMIN_NAME:-admin}
+      - T_PASS=${T_COUCHDB_USER_ADMIN_PASS:-password}
+      - T_HOST_NAME=${T_HOST_NAME:-localhost}
+      - T_PROTOCOL=${T_PROTOCOL:-http}
+      - T_RUN_MODE=production
+      - T_MODULES=${T_MODULES:-['csv']}
+      - T_REPORTING_DELAY=${T_REPORTING_DELAY:-300000}
+      - T_PAID_MODE=${T_PAID_MODE:-site}
+      - T_PAID_ALLOWANCE=${T_PAID_ALLOWANCE:-unlimited}
+      - T_UPLOAD_TOKEN=${T_UPLOAD_TOKEN:-password}
+      - T_LEGACY=${T_LEGACY:-false}
+      - T_AUTO_COMMIT=${T_AUTO_COMMIT:-true}
+      - T_AUTO_COMMIT_FREQUENCY=${T_AUTO_COMMIT_FREQUENCY:-60000}
+      - T_REPLICATE=${T_REPLICATE:-[]}
+      - T_JWT_ISSUER=${T_JWT_ISSUER:-Tangerine}
+      - T_JWT_EXPIRES_IN=${T_JWT_EXPIRES_IN:-1h}
+      - T_JWT_SIGNING_ALGORITHM=${T_JWT_SIGNING_ALGORITHM:-HS256}
+      - T_JWT_VERIFICATION_ALGORITHMS=${T_JWT_VERIFICATION_ALGORITHMS:-['HS256', 'HS384', 'HS512']}
+      - T_PASSWORD_POLICY=${T_PASSWORD_POLICY:-^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[~!@#$%^&\*()\-_=+<>,.;:|[\]{}])(?=.{8,})}
+      - T_CSV_BATCH_SIZE=${T_CSV_BATCH_SIZE:-50}
+      - T_LIMIT_NUMBER_OF_CHANGES=${T_LIMIT_NUMBER_OF_CHANGES:-200}
+      - T_CENTRALLY_MANAGED_USER_PROFILE=${T_CENTRALLY_MANAGED_USER_PROFILE:-false}
+      - T_HIDE_PROFILE=${T_HIDE_PROFILE:-false}
+      - T_HIDE_SKIP_IF=${T_HIDE_SKIP_IF:-true}
+      - T_USER_SHORT_CODE_LENGTH=${T_USER_SHORT_CODE_LENGTH:-6}
+      - T_ORIENTATION=${T_ORIENTATION:-any}
+      - T_CUSTOM_LOGIN_MARKUP=${T_CUSTOM_LOGIN_MARKUP:-}
+      - T_ARCHIVE_APKS_TO_DISK=${T_ARCHIVE_APKS_TO_DISK:-true}
+      - T_ARCHIVE_PWAS_TO_DISK=${T_ARCHIVE_PWAS_TO_DISK:-true}
+    volumes:
+      - tangerine-data:/tangerine
+      - csv-data:/csv
+      - archives-data:/archives
+      - state-data:/state
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/login"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  server-ui:
+    image: ${IMAGE_PREFIX:-tangerine}/tangerine-server-ui:${T_TAG:-latest}
+    container_name: tangerine-server-ui
+    build:
+      context: ..
+      dockerfile: dockerhub/Dockerfile.server-ui
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
+      - T_RUN_MODE=production
+
+  apk-generator:
+    image: ${IMAGE_PREFIX:-tangerine}/tangerine-apk-generator:${T_TAG:-latest}
+    container_name: tangerine-apk-generator
+    build:
+      context: ..
+      dockerfile: dockerhub/Dockerfile.apk-generator
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
+    volumes:
+      - tangerine-data:/tangerine
+      - archives-data:/archives
+      - state-data:/state
+
+  nginx:
+    image: nginx:alpine
+    container_name: tangerine-nginx
+    restart: unless-stopped
+    ports:
+      - "${T_PORT_MAPPING:-80:80}"
+    depends_on:
+      - server
+      - server-ui
+      - apk-generator
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  couchdb-data:
+  tangerine-data:
+  csv-data:
+  archives-data:
+  state-data:

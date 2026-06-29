@@ -1,0 +1,119 @@
+# ============================================================
+# STAGE 1: Build Angular apps (client, online-survey, PWA tools)
+# ============================================================
+FROM node:18-alpine AS builder
+
+RUN apk add --no-cache git git-lfs bash curl && \
+    git lfs install && \
+    git config --global url."https://".insteadOf git://
+
+WORKDIR /build
+
+# ---------- Tangy Form (local dependency for client) ----------
+COPY tangy-form/ /build/tangy-form/
+
+# ---------- Client ----------
+COPY client/package.json client/
+RUN cd client && npm install
+
+COPY client/ /build/client/
+RUN cd client && ./node_modules/.bin/ng build --base-href "./" -c production
+
+# ---------- PWA Tools ----------
+COPY client/pwa-tools/ /build/client/pwa-tools/
+RUN cd client/pwa-tools/updater-app && \
+    npm install && \
+    ./node_modules/.bin/bower install --allow-root && \
+    npm run build && \
+    cp logo.svg build/default/
+
+# Package APK sources
+RUN mkdir -p client/builds/apk/www && \
+    cp -r client/dist/tangerine-client client/builds/apk/www/shell && \
+    mkdir -p client/builds/pwa && \
+    cp -r client/pwa-tools/updater-app/build/default client/builds/pwa && \
+    mkdir client/builds/pwa/release-uuid && \
+    cp -r client/dist/tangerine-client client/builds/pwa/release-uuid/app
+
+# Fix module links for APK
+RUN sed -i 's/type="module"/type="text\/javascript"/g' /build/client/builds/apk/www/shell/index.html
+
+# ---------- Online Survey App ----------
+COPY online-survey-app/package.json online-survey-app/
+RUN cd online-survey-app && npm install
+
+COPY online-survey-app/ /build/online-survey-app/
+RUN cd online-survey-app && ./node_modules/.bin/ng build --base-href "./"
+
+# ============================================================
+# STAGE 2: Server image
+# ============================================================
+FROM node:18-alpine
+
+RUN apk add --no-cache git git-lfs bash curl jq openssh && \
+    git lfs install && \
+    git config --global url."https://".insteadOf git://
+
+# Create required directories
+RUN mkdir -p /tangerine \
+    /csv /archives \
+    /tangerine/client/releases/prod/apks \
+    /tangerine/client/releases/prod/pwas \
+    /tangerine/client/releases/prod/dat \
+    /tangerine/client/releases/qa/apks \
+    /tangerine/client/releases/qa/pwas \
+    /tangerine/client/releases/qa/dat \
+    /tangerine/translations \
+    /tangerine/content-sets \
+    /tangerine/upgrades \
+    /tangerine/scripts \
+    /state
+
+# ---------- Tangy Form (local dependency) ----------
+COPY tangy-form/ /tangerine/tangy-form/
+RUN cd /tangerine/tangy-form && npm install
+
+# ---------- Install server dependencies ----------
+COPY server/package.json /tangerine/server/
+RUN cd /tangerine/server && npm install
+
+# ---------- Copy built artifacts from builder ----------
+COPY --from=builder /build/client/dist /tangerine/client/dist
+COPY --from=builder /build/client/builds /tangerine/client/builds
+COPY --from=builder /build/client/pwa-tools /tangerine/client/pwa-tools
+COPY --from=builder /build/online-survey-app/dist /tangerine/online-survey-app/dist
+
+# ---------- Copy server source code ----------
+COPY server/ /tangerine/server/
+
+# ---------- Copy other assets ----------
+COPY translations/ /tangerine/translations/
+COPY content-sets/ /tangerine/content-sets/
+COPY upgrades/ /tangerine/upgrades/
+COPY scripts/ /tangerine/scripts/
+COPY logo.svg /tangerine/logo.svg
+COPY online-survey-app/ /tangerine/online-survey-app/
+
+# Link global commands
+RUN cd /tangerine/server && npm link
+
+# Build TypeScript for production
+RUN cd /tangerine/server && npm run build
+
+# ---------- Default environment variables ----------
+ENV T_USER1=user1 \
+    T_USER1_PASSWORD=password \
+    T_ADMIN=admin \
+    T_PASS=password \
+    T_HOST_NAME=localhost \
+    T_PROTOCOL=http \
+    T_RUN_MODE=production \
+    T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/ \
+    T_MODULES="['csv']"
+
+EXPOSE 80
+
+COPY dockerhub/entrypoint-server.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

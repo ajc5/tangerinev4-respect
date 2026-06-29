@@ -1,0 +1,60 @@
+# ============================================================
+# STAGE 1: Build editor Angular app
+# ============================================================
+FROM node:18-alpine AS builder
+
+RUN apk add --no-cache git git-lfs bash && \
+    git lfs install && \
+    git config --global url."https://".insteadOf git://
+
+WORKDIR /build
+
+# ---------- Tangy Form (local dependencies) ----------
+COPY tangy-form/ /build/tangy-form/
+COPY tangy-form-editor/ /build/tangy-form-editor/
+RUN cd /build/tangy-form-editor && npm install
+
+# ---------- Install editor dependencies ----------
+COPY editor/package.json /build/editor/
+RUN cd /build/editor && npm install
+
+# ---------- Build editor ----------
+COPY editor/ /build/editor/
+RUN cd /build/editor && ./node_modules/.bin/ng build --base-href "./" -c production
+RUN cd /build/editor && ./node_modules/.bin/workbox generateSW
+
+# ============================================================
+# STAGE 2: Server-UI image
+# ============================================================
+FROM node:18-alpine
+
+RUN apk add --no-cache git git-lfs bash curl jq && \
+    git lfs install && \
+    git config --global url."https://".insteadOf git://
+
+# ---------- Install server-ui dependencies ----------
+COPY server-ui/package.json /tangerine/server-ui/
+RUN cd /tangerine/server-ui && npm install
+
+# ---------- Copy built editor from builder ----------
+COPY --from=builder /build/editor/dist /tangerine/editor/dist
+
+# ---------- Copy server-ui source ----------
+COPY server-ui/ /tangerine/server-ui/
+
+# Link global commands
+RUN cd /tangerine/server-ui && npm link
+
+# Build TypeScript for production
+RUN cd /tangerine/server-ui && npm run build
+
+# ---------- Default environment variables ----------
+ENV T_COUCHDB_ENDPOINT=http://admin:password@couchdb:5984/ \
+    T_RUN_MODE=production
+
+EXPOSE 80
+
+COPY dockerhub/entrypoint-server-ui.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

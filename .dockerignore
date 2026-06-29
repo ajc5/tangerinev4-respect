@@ -12,4 +12,10 @@ client/tangy-forms/bower_components
 server/node_modules
 scripts/generate-csv/node_modules
 scripts/generate-uploads/node_modules
+tangy-form/node_modules
+tangy-form-editor/node_modules
+apk-generator/node_modules
+server-ui/node_modules
+tangerine-preview
+docs
 config.sh
