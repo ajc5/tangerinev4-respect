@@ -1,0 +1,65 @@
+name: Build & Publish Tangerine Docker Images
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKER_USER: albjo
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build & Push couchdb
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerhub/Dockerfile.couchdb
+          push: true
+          tags: |
+            ${{ env.DOCKER_USER }}/tangerine-couchdb:${{ github.ref_name }}
+            ${{ env.DOCKER_USER }}/tangerine-couchdb:latest
+
+      - name: Build & Push server
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerhub/Dockerfile.server
+          push: true
+          tags: |
+            ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }}
+            ${{ env.DOCKER_USER }}/tangerine-server:latest
+
+      - name: Build & Push server-ui
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerhub/Dockerfile.server-ui
+          push: true
+          tags: |
+            ${{ env.DOCKER_USER }}/tangerine-server-ui:${{ github.ref_name }}
+            ${{ env.DOCKER_USER }}/tangerine-server-ui:latest
+
+      - name: Build & Push apk-generator
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerhub/Dockerfile.apk-generator
+          push: true
+          tags: |
+            ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }}
+            ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest
