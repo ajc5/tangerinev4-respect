@@ -24,7 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
-      - run: docker build -f dockerhub/Dockerfile.server -t ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-server:latest .
+      - run: ls -la dockerhub/ && ls -la server/package.json && wc -c server/package.json
+      - run: docker build -f dockerhub/Dockerfile.server -t ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-server:latest --progress plain .
       - run: docker push ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }}
       - run: docker push ${{ env.DOCKER_USER }}/tangerine-server:latest
 
