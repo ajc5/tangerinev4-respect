@@ -9,6 +9,10 @@ RUN apk add --no-cache git git-lfs bash && \
 
 WORKDIR /build
 
+# ---------- Tangy Form (local dependency for client) ----------
+COPY tangy-form/ /build/tangy-form/
+RUN cd /build/tangy-form && npm install
+
 # ---------- Client ----------
 COPY client/package.json client/
 RUN cd client && npm install
