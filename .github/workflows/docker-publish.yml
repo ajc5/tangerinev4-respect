@@ -47,5 +47,3 @@ jobs:
       - run: docker build -f dockerhub/Dockerfile.apk-generator -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest .
       - run: docker push ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }}
       - run: docker push ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest
-            --push \
-            .
