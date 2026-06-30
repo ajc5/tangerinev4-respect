@@ -9,54 +9,43 @@ env:
   DOCKER_USER: albjo
 
 jobs:
-  build-and-push:
+  couchdb:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
+      - run: docker build -f dockerhub/Dockerfile.couchdb -t ${{ env.DOCKER_USER }}/tangerine-couchdb:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-couchdb:latest .
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-couchdb:${{ github.ref_name }}
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-couchdb:latest
 
-      - name: Set up Docker Buildx
-        run: docker buildx create --use
+  server:
+    needs: couchdb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
+      - run: docker build -f dockerhub/Dockerfile.server -t ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-server:latest .
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }}
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-server:latest
 
-      - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
+  server-ui:
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
+      - run: docker build -f dockerhub/Dockerfile.server-ui -t ${{ env.DOCKER_USER }}/tangerine-server-ui:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-server-ui:latest .
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-server-ui:${{ github.ref_name }}
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-server-ui:latest
 
-      - name: Build & Push couchdb
-        run: |
-          docker buildx build \
-            -f dockerhub/Dockerfile.couchdb \
-            -t ${{ env.DOCKER_USER }}/tangerine-couchdb:${{ github.ref_name }} \
-            -t ${{ env.DOCKER_USER }}/tangerine-couchdb:latest \
-            --platform linux/amd64 \
-            --push \
-            .
-
-      - name: Build & Push server
-        run: |
-          docker buildx build \
-            -f dockerhub/Dockerfile.server \
-            -t ${{ env.DOCKER_USER }}/tangerine-server:${{ github.ref_name }} \
-            -t ${{ env.DOCKER_USER }}/tangerine-server:latest \
-            --platform linux/amd64 \
-            --push \
-            .
-
-      - name: Build & Push server-ui
-        run: |
-          docker buildx build \
-            -f dockerhub/Dockerfile.server-ui \
-            -t ${{ env.DOCKER_USER }}/tangerine-server-ui:${{ github.ref_name }} \
-            -t ${{ env.DOCKER_USER }}/tangerine-server-ui:latest \
-            --platform linux/amd64 \
-            --push \
-            .
-
-      - name: Build & Push apk-generator
-        run: |
-          docker buildx build \
-            -f dockerhub/Dockerfile.apk-generator \
-            -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }} \
-            -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest \
-            --platform linux/amd64 \
+  apk-generator:
+    needs: server-ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ env.DOCKER_USER }} --password-stdin
+      - run: docker build -f dockerhub/Dockerfile.apk-generator -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }} -t ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest .
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-apk-generator:${{ github.ref_name }}
+      - run: docker push ${{ env.DOCKER_USER }}/tangerine-apk-generator:latest
             --push \
             .
