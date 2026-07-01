@@ -7,7 +7,7 @@ import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { UserService } from '../user/user.service';
 import {SyncSessionInfo} from '../../../modules/sync/services/sync-session/sync-session-v2.service';
 import {DbService} from '../db/db.service';
-import createGroupDatabase = require('src/create-group-database');
+import createGroupDatabase = require('../../../create-group-database');
 import {HttpService} from '@nestjs/axios';
 const insertGroupViews = require('../../../insert-group-views.js');
 

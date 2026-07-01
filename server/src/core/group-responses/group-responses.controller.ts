@@ -1,7 +1,7 @@
 import { GroupResponsesService } from './../../shared/services/group-responses/group-responses.service';
 import { Controller, All, Param, Body , Req} from '@nestjs/common';
 import { Request } from 'express';
-import { decodeJWT } from 'src/auth-utils';
+import { decodeJWT } from '../../auth-utils';
 const log = require('tangy-log').log
 
 @Controller('group-responses')

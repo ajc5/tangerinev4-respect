@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TangerineConfigService } from '../tangerine-config/tangerine-config.service';
 import PouchDB from 'pouchdb'
 import { v4 as UUID } from 'uuid'
-import { User } from 'src/shared/classes/user';
+import { User } from '../../classes/user';
 const DB = require('../../../db')
 const log = require('tangy-log').log
 

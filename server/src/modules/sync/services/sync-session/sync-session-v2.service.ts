@@ -5,8 +5,8 @@ import {v4 as UUID} from 'uuid'
 import { GroupService } from '../../../../shared/services/group/group.service';
 import { ClientUserService } from '../../../../shared/services/client-user/client-user.service';
 import { DbService } from '../../../../shared/services/db/db.service';
-import { LocationConfig } from 'src/shared/classes/group-device.class';
-import { GroupDeviceService } from 'src/shared/services/group-device/group-device.service';
+import { LocationConfig } from '../../../../shared/classes/group-device.class';
+import { GroupDeviceService } from '../../../../shared/services/group-device/group-device.service';
 import {HttpService} from "@nestjs/axios";
 const log = require('tangy-log').log
 
