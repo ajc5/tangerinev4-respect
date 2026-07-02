@@ -66,7 +66,7 @@ services:
       - archives-data:/archives
       - state-data:/state
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:80/login"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
       interval: 15s
       timeout: 5s
       retries: 10
