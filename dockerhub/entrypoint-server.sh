@@ -11,6 +11,7 @@ mkdir -p /tangerine/client/releases/prod/dat
 mkdir -p /tangerine/client/releases/qa/apks
 mkdir -p /tangerine/client/releases/qa/pwas
 mkdir -p /tangerine/client/releases/qa/dat
+mkdir -p /tangerine/client/content/groups
 
 # Initialize state files if they don't exist
 [ ! -f /state/reporting-worker-state.json ] && echo '{}' > /state/reporting-worker-state.json

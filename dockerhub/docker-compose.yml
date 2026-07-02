@@ -58,7 +58,10 @@ services:
       - T_ARCHIVE_APKS_TO_DISK=${T_ARCHIVE_APKS_TO_DISK:-true}
       - T_ARCHIVE_PWAS_TO_DISK=${T_ARCHIVE_PWAS_TO_DISK:-true}
     volumes:
-      - tangerine-data:/tangerine
+      - groups-data:/tangerine/groups
+      - client-releases-data:/tangerine/client/releases
+      - client-content-groups-data:/tangerine/client/content/groups
+      - client-content-assets-data:/tangerine/client/content/assets
       - csv-data:/csv
       - archives-data:/archives
       - state-data:/state
@@ -82,22 +85,22 @@ services:
       - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
       - T_RUN_MODE=production
 
-  apk-generator:
-    image: ${IMAGE_PREFIX:-albjo}/tangerine-apk-generator:${T_TAG:-latest}
-    container_name: tangerine-apk-generator
-    build:
-      context: ..
-      dockerfile: dockerhub/Dockerfile.apk-generator
-    restart: unless-stopped
-    depends_on:
-      server:
-        condition: service_healthy
-    environment:
-      - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
-    volumes:
-      - tangerine-data:/tangerine
-      - archives-data:/archives
-      - state-data:/state
+  # apk-generator:
+  #   image: ${IMAGE_PREFIX:-albjo}/tangerine-apk-generator:${T_TAG:-latest}
+  #   container_name: tangerine-apk-generator
+  #   build:
+  #     context: ..
+  #     dockerfile: dockerhub/Dockerfile.apk-generator
+  #   restart: unless-stopped
+  #   depends_on:
+  #     server:
+  #       condition: service_healthy
+  #   environment:
+  #     - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
+  #   volumes:
+  #     - tangerine-data:/tangerine
+  #     - archives-data:/archives
+  #     - state-data:/state
 
   nginx:
     image: nginx:alpine
@@ -108,13 +111,16 @@ services:
     depends_on:
       - server
       - server-ui
-      - apk-generator
+      # - apk-generator
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   couchdb-data:
-  tangerine-data:
+  groups-data:
+  client-releases-data:
+  client-content-groups-data:
+  client-content-assets-data:
   csv-data:
   archives-data:
   state-data:
