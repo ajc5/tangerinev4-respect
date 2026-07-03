@@ -42,4 +42,4 @@ fi
 # Start the server
 cd /tangerine/server
 echo "Starting Tangerine Server..."
-npm run start:prod
+npm run start:prod:skip-build
