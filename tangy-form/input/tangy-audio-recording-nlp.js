@@ -10,6 +10,7 @@ import "@polymer/paper-button/paper-button.js";
 import "@polymer/paper-item/paper-item.js";
 import "@polymer/paper-progress/paper-progress.js";
 import { TangyInputBase } from "../tangy-input-base.js";
+import { generateXapiStatementFromTemplate, XAPI_INTERACTION_TYPE, setXapiResultCommon } from '../util/tangy-xapi-utils.js';
 import "./tangy-audio-playback.js";
 
 export class TangyAudioRecordingNlp extends TangyInputBase {
@@ -207,6 +208,31 @@ export class TangyAudioRecordingNlp extends TangyInputBase {
         observer: 'onDisabledChange',
       }
     };
+  }
+
+  getXapiStatement() {
+    const nlpResults = this.nlpResults || this.value;
+    if (!nlpResults) return null;
+    const result = {};
+    result.response = nlpResults.hypothesis || '';
+    result.extensions = {
+      "http://tangerinecentral.org/xapi/extensions/nlp-correct-wpm": nlpResults.measures && nlpResults.measures.correct_wpm,
+      "http://tangerinecentral.org/xapi/extensions/nlp-annotated-reference": nlpResults.annotated_reference || '',
+      "http://tangerinecentral.org/xapi/extensions/nlp-analysis": nlpResults.analysis || '',
+      "http://tangerinecentral.org/xapi/extensions/nlp-recommendation": nlpResults.recommendation || '',
+      "http://tangerinecentral.org/xapi/extensions/nlp-tip": nlpResults.tip || ''
+    };
+    setXapiResultCommon(result);
+    return generateXapiStatementFromTemplate(this, {
+      object: {
+        definition: {
+          interactionType: XAPI_INTERACTION_TYPE.OTHER,
+          correctResponsesPattern: [this.stimuliText],
+          ...(this.language ? { extensions: { "http://tangerinecentral.org/xapi/extensions/nlp-language": this.language } } : {})
+        }
+      },
+      result
+    });
   }
 
   connectedCallback() {

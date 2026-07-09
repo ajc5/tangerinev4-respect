@@ -1,21 +1,25 @@
 <div #container> </div>
 
-<!-- xAPI Debug Panel -->
-<div class="xapi-debug-panel">
+<!-- xAPI Panel -->
+<div class="xapi-panel" *ngIf="xapiDebugInfo.endpoint && xapiDebugInfo.auth && xapiDebugInfo.actor">
   <details>
-    <summary>xAPI Launch Params (Debug)</summary>
-    <table class="xapi-debug-table">
+    <summary>xAPI Launch Params</summary>
+    <table class="xapi-table">
       <tr>
-        <td class="xapi-debug-label">Endpoint:</td>
-        <td class="xapi-debug-value">{{ xapiDebugInfo.endpoint || 'Not set' }}</td>
+        <td class="xapi-label">Endpoint:</td>
+        <td class="xapi-value">{{ xapiDebugInfo.endpoint }}</td>
       </tr>
       <tr>
-        <td class="xapi-debug-label">Auth:</td>
-        <td class="xapi-debug-value">{{ xapiDebugInfo.auth ? '***' : 'Not set' }}</td>
+        <td class="xapi-label">Auth:</td>
+        <td class="xapi-value">***</td>
       </tr>
       <tr>
-        <td class="xapi-debug-label">Registration:</td>
-        <td class="xapi-debug-value">{{ xapiDebugInfo.registration || 'Not set (will be generated)' }}</td>
+        <td class="xapi-label">Actor:</td>
+        <td class="xapi-value">{{ xapiDebugInfo.actor }}</td>
+      </tr>
+      <tr>
+        <td class="xapi-label">Registration:</td>
+        <td class="xapi-value">{{ xapiDebugInfo.registration || 'Will be generated' }}</td>
       </tr>
     </table>
   </details>

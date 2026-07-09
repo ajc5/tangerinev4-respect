@@ -30,11 +30,15 @@ export class TangyFormsPlayerComponent implements OnInit {
   // Optional registration UUID from URL params (like respect.html)
   private lrsRegistration: string
 
+  // Actor from URL params
+  private lrsActor: any
+
   // xAPI debug info to display in the UI
   xapiDebugInfo = {
     endpoint: '',
     auth: '',
     registration: '',
+    actor: '',
   }
 
   formId: string;
@@ -212,6 +216,17 @@ export class TangyFormsPlayerComponent implements OnInit {
       console.log('[xAPI Debug] Registration from URL:', this.lrsRegistration);
     }
     
+    // Parse actor from URL params
+    if (urlParams.has('actor')) {
+      try {
+        this.lrsActor = JSON.parse(urlParams.get('actor'));
+        this.xapiDebugInfo.actor = this.lrsActor.name || JSON.stringify(this.lrsActor);
+        console.log('[xAPI Debug] Actor from URL:', this.lrsActor);
+      } catch (e) {
+        console.log('[xAPI Debug] Failed to parse actor from URL');
+      }
+    }
+    
     // Also capture @Input values if set (in case they're set but URL params are not)
     if (this.lrsEndpoint && !this.xapiDebugInfo.endpoint) this.xapiDebugInfo.endpoint = this.lrsEndpoint;
     if (this.lrsAuth && !this.xapiDebugInfo.auth) this.xapiDebugInfo.auth = this.lrsAuth;
@@ -275,14 +290,13 @@ export class TangyFormsPlayerComponent implements OnInit {
 
   /**
    * Collect xAPI statements from form inputs and send them all in a single batch request to the LRS.
-   * This follows the pattern from respect.html which uses sendStatements with an array.
    */
   private async sendXapiStatements(formElement: any): Promise<void> {
     console.log('[xAPI Debug] sendXapiStatements called');
     
-    // Skip if LRS is not configured
-    if (!this.lrsEndpoint || !this.lrsAuth) {
-      console.log('[xAPI Debug] Skipping – no endpoint/auth configured. endpoint:', this.lrsEndpoint, 'auth:', this.lrsAuth);
+    // Skip if LRS is not configured or actor is missing
+    if (!this.lrsEndpoint || !this.lrsAuth || !this.lrsActor) {
+      console.log('[xAPI Debug] Skipping – endpoint/auth/actor not fully configured. endpoint:', this.lrsEndpoint, 'auth:', this.lrsAuth, 'actor:', this.lrsActor);
       return;
     }
 
@@ -300,10 +314,28 @@ export class TangyFormsPlayerComponent implements OnInit {
     const statements = [];
     for (const input of inputs) {
       if (input.xapiStatement && typeof input.xapiStatement === 'object') {
-        // Set the registration on the statement's context, following the respect.html pattern
+        // Set the actor and registration on each statement
+        input.xapiStatement.actor = this.lrsActor;
         input.xapiStatement.context = input.xapiStatement.context || {};
         input.xapiStatement.context.registration = registration;
         statements.push(input.xapiStatement);
+      }
+    }
+
+    // Collect form-level xAPI statements (form started and form completed)
+    const response = formElement.response;
+    if (response && response.form) {
+      if (response.form.xapiStatementStarted && typeof response.form.xapiStatementStarted === 'object') {
+        response.form.xapiStatementStarted.actor = this.lrsActor;
+        response.form.xapiStatementStarted.context = response.form.xapiStatementStarted.context || {};
+        response.form.xapiStatementStarted.context.registration = registration;
+        statements.unshift(response.form.xapiStatementStarted);
+      }
+      if (response.form.xapiStatementCompleted && typeof response.form.xapiStatementCompleted === 'object') {
+        response.form.xapiStatementCompleted.actor = this.lrsActor;
+        response.form.xapiStatementCompleted.context = response.form.xapiStatementCompleted.context || {};
+        response.form.xapiStatementCompleted.context.registration = registration;
+        statements.push(response.form.xapiStatementCompleted);
       }
     }
 

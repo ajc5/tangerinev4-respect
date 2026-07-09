@@ -1,5 +1,5 @@
 /* xAPI Debug Panel */
-.xapi-debug-panel {
+.xapi-panel {
   margin-top: 2rem;
   padding: 0.75rem;
   border: 1px solid #ccc;
@@ -9,35 +9,35 @@
   font-size: 0.85rem;
 }
 
-.xapi-debug-panel details {
+.xapi-panel details {
   cursor: pointer;
 }
 
-.xapi-debug-panel summary {
+.xapi-panel summary {
   font-weight: bold;
   color: #555;
   margin-bottom: 0.5rem;
 }
 
-.xapi-debug-table {
+.xapi-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.xapi-debug-table tr td {
+.xapi-table tr td {
   padding: 0.25rem 0.5rem;
   border-bottom: 1px solid #e0e0e0;
   vertical-align: top;
 }
 
-.xapi-debug-label {
+.xapi-label {
   white-space: nowrap;
   font-weight: 600;
   color: #333;
   width: 120px;
 }
 
-.xapi-debug-value {
+.xapi-value {
   word-break: break-all;
   color: #666;
 }

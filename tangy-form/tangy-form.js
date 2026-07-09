@@ -7,6 +7,7 @@ import { t } from './util/t.js'
 import { tangyFormReducer } from './tangy-form-reducer.js'
 import { TangyFormResponseModel } from './tangy-form-response-model.js';
 import { TangyFormItemHelpers } from './tangy-form-item-callback-helpers.js'
+import { generateFormXapiStatement } from './util/tangy-xapi-utils.js'
 
 
 // Core elements.
@@ -55,11 +56,27 @@ export class TangyForm extends PolymerElement {
       }
     }
 
+  /**
+   * Generate an xAPI statement for form start (attempted).
+   */
+  getXapiFormStartedStatement() {
+    return generateFormXapiStatement(this, 'attempted');
+  }
+
+  /**
+   * Generate an xAPI statement for form completion (completed).
+   */
+  getXapiFormCompletedStatement() {
+    return generateFormXapiStatement(this, 'completed');
+  }
+
   // For creating a new response. Call it directly to force a new response when working programatically otherwise
   // this will get called later if no response has been assigned by the time afterNextRender is called.
   newResponse() {
     let initialResponse = new TangyFormResponseModel() 
     initialResponse.form = this.getProps()
+    // Attach form started xAPI statement
+    initialResponse.form.xapiStatementStarted = this.getXapiFormStartedStatement()
     this.querySelectorAll('tangy-form-item').forEach((item) => {
       initialResponse.items.push(item.getProps())
     })
@@ -551,6 +568,8 @@ export class TangyForm extends PolymerElement {
     this.store.dispatch({
       type: 'FORM_RESPONSE_COMPLETE'
     })
+    // Store the completed xAPI statement on the response (same pattern as newResponse/set response)
+    this.response.form.xapiStatementCompleted = this.getXapiFormCompletedStatement();
     const cancelledComplete = !this.dispatchEvent(new CustomEvent('tangy-form-complete', {cancelable: true}))
     if (cancelledComplete) return
     if (this.hasSummary) {
