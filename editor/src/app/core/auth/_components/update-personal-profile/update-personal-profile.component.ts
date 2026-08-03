@@ -86,12 +86,7 @@ export class UpdatePersonalProfileComponent implements OnInit {
       this.errorHandler.handleError(_TRANSLATE('User Details could not be Updated'));
     }
   }
-  copyOpdsUrl() {
-    const url = `${this.baseUrl}/respect-app-manifest?respectToken=${this.user.respectToken}`;
-    navigator.clipboard.writeText(url).then(() => {
-      this.errorHandler.handleError(_TRANSLATE('URL copied to clipboard'));
-    }).catch(() => {
-      this.errorHandler.handleError(_TRANSLATE('Failed to copy URL'));
-    });
+  getRespectUrl() {
+    return `${this.baseUrl}/respect-app-manifest?respectToken=${this.user.respectToken}`;
   }
 }

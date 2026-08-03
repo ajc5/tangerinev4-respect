@@ -68,14 +68,8 @@ export class ManageUsersComponent implements OnInit {
     }
   }
 
-  copyOpdsUrl(user) {
-    if (!user.respectToken) return;
-    const url = `${this.baseUrl}/respect-app-manifest?respectToken=${user.respectToken}`;
-    navigator.clipboard.writeText(url).then(() => {
-      this.errorHandler.handleError(_TRANSLATE('RESPECT Link copied to clipboard'));
-    }).catch(() => {
-      this.errorHandler.handleError(_TRANSLATE('Failed to copy link'));
-    });
+  getRespectUrl(user) {
+    return `${this.baseUrl}/respect-app-manifest?respectToken=${user.respectToken}`;
   }
 
 }

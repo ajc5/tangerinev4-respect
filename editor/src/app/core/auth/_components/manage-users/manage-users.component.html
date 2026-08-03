@@ -17,13 +17,14 @@
   <ng-container matColumnDef="publicAccessUrl">
     <mat-header-cell *matHeaderCellDef> {{'RESPECT Link'|translate}} </mat-header-cell>
     <mat-cell *matCellDef="let user">
-      <span *ngIf="user.respectToken"
+      <a *ngIf="user.respectToken"
         class="tangy-foreground-primary"
-        (click)="copyOpdsUrl(user)"
-        title="{{'Copy RESPECT Link'|translate}}"
-        style="cursor:pointer;">
-        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
-      </span>
+        [href]="getRespectUrl(user)"
+        target="_blank"
+        rel="noopener"
+        title="{{'Open RESPECT Link'|translate}}">
+        <i class="material-icons mat-24 tangy-location-list-icon">open_in_new</i>
+      </a>
       <span *ngIf="!user.respectToken" class="tangy-foreground-secondary">—</span>
     </mat-cell>
   </ng-container>
@@ -72,13 +73,14 @@
   <ng-container matColumnDef="publicAccessUrl">
     <mat-header-cell *matHeaderCellDef> {{'RESPECT Link'|translate}} </mat-header-cell>
     <mat-cell *matCellDef="let user">
-      <span *ngIf="user.respectToken"
+      <a *ngIf="user.respectToken"
         class="tangy-foreground-primary"
-        (click)="copyOpdsUrl(user)"
-        title="{{'Copy RESPECT Link'|translate}}"
-        style="cursor:pointer;">
-        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
-      </span>
+        [href]="getRespectUrl(user)"
+        target="_blank"
+        rel="noopener"
+        title="{{'Open RESPECT Link'|translate}}">
+        <i class="material-icons mat-24 tangy-location-list-icon">open_in_new</i>
+      </a>
       <span *ngIf="!user.respectToken" class="tangy-foreground-secondary">—</span>
     </mat-cell>
   </ng-container>

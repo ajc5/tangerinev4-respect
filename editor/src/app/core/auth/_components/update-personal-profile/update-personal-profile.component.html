@@ -36,11 +36,21 @@
     </mat-form-field>
     <br>
     <br>
-    <div *ngIf="user.respectToken" style="margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+    <div *ngIf="user.respectToken" style="margin-bottom:16px;">
       <label style="font-weight:500; color:rgba(0,0,0,0.54); font-size:12px;">{{'RESPECT Link'|translate}}</label>
-      <button mat-icon-button type="button" (click)="copyOpdsUrl()" title="{{'Copy RESPECT Link'|translate}}">
-        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
-      </button>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <mat-form-field style="flex:1;">
+          <input matInput [value]="getRespectUrl()" readonly placeholder="{{'RESPECT Link'|translate}}" />
+        </mat-form-field>
+        <a
+          class="tangy-foreground-primary"
+          [href]="getRespectUrl()"
+          target="_blank"
+          rel="noopener"
+          title="{{'Open RESPECT Link'|translate}}">
+          <i class="material-icons mat-24 tangy-location-list-icon">open_in_new</i>
+        </a>
+      </div>
     </div>
     <br>
     <br>
