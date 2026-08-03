@@ -6,6 +6,7 @@ const GROUPS_DB = new DB('groups');
 const { createLoginJWT } = require('./auth-utils');
 const { permissionsList } = require('./permissions-list.js');
 const { v4: uuidV4 } = require('uuid');
+const { getOrCreateRespectToken } = require('./respect-token-cache');
 
 // Ensure Mango index for respectToken lookups
 USERS_DB.createIndex({ index: { fields: ['respectToken'] } }).catch(err =>
@@ -19,13 +20,20 @@ const login = async (req, res) => {
       const permissions = await getSitewidePermissions(username);
       const jwtToken = createLoginJWT({ username, permissions });
       const user = await findUserByUsername(username);
-      // Generate respectToken on-the-fly if missing (handles existing users)
-      // user may be undefined for user1 (superadmin not in the DB)
-      if (user && !user.respectToken) {
-        user.respectToken = uuidV4();
-        await USERS_DB.put(user);
+      // user1 (superadmin) is not stored in the users DB, so it has no persisted
+      // respectToken. Generate one on-the-fly and keep it in the in-memory cache
+      // so a stable respectUrl is always returned.
+      let respectToken = null;
+      if (user) {
+        // Generate respectToken on-the-fly if missing (handles existing users)
+        if (!user.respectToken) {
+          user.respectToken = uuidV4();
+          await USERS_DB.put(user);
+        }
+        respectToken = user.respectToken;
+      } else if (username === process.env.T_USER1) {
+        respectToken = getOrCreateRespectToken(username);
       }
-      const respectToken = user ? user.respectToken : null;
       const respectUrl = respectToken
         ? `${req.protocol}://${req.get('host')}/respect-app-manifest?respectToken=${respectToken}`
         : null;

@@ -1,6 +1,7 @@
 const log = require('tangy-log').log;
 const DB = require('../db.js');
 const USERS_DB = new DB('users');
+const { isValidRespectToken } = require('../respect-token-cache');
 
 module.exports = async (req, res, next) => {
   const respectToken = req.query.respectToken;
@@ -14,6 +15,17 @@ module.exports = async (req, res, next) => {
 
   const errorMessage = `Permission denied at ${req.url}`;
   try {
+    // user1 (superadmin) is not stored in the users DB; validate its token
+    // against the in-memory cache and grant access to all groups.
+    const cachedUsername = isValidRespectToken(respectToken);
+    if (cachedUsername) {
+      const { getGroupsByUser } = require('../users.js');
+      const groups = await getGroupsByUser(cachedUsername);
+      const allowedGroupIds = groups.map(g => g.attributes.name);
+      req.respectUser = { username: cachedUsername, allowedGroupIds };
+      return next();
+    }
+
     await USERS_DB.createIndex({ index: { fields: ['respectToken'] } });
     const results = await USERS_DB.find({ selector: { respectToken } });
     
