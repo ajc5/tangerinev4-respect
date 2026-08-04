@@ -64,14 +64,26 @@ if (process.env.T_AUTO_COMMIT === 'true') {
 }
 module.exports = async function expressAppBootstrap(app) {
 
+// URL prefixes that must be served with no Vary header and byte-identical
+// content (see the OPDS/Learning Resource caching requirements below). The
+// global CORS middleware would add `Vary: Origin`, and compression would add
+// `Vary: Accept-Encoding` and drop Content-Length (chunked), so both are
+// skipped for these paths. This lets network operators / schools pre-cache the
+// resources and validate them later with If-None-Match / If-Modified-Since.
+const CACHE_FRIENDLY_URL_PREFIXES = ['/opds', '/respect-app-manifest', '/releases']
+
 // Enable CORS
 try {
   if (process.env.T_CORS_ALLOWED_ORIGINS) {
     const origin = JSON.parse(process.env.T_CORS_ALLOWED_ORIGINS)
-    app.use(cors({
-      credentials: true,
-      origin
-    }))
+    const corsMiddleware = cors({ credentials: true, origin })
+    app.use(function (req, res, next) {
+      const url = req.originalUrl || req.url
+      if (CACHE_FRIENDLY_URL_PREFIXES.some(prefix => url.startsWith(prefix))) {
+        return next()
+      }
+      return corsMiddleware(req, res, next)
+    })
     log.info(`CORS enabled for origins: ${origin}`)
   } else {
     log.info('CORS is disabled')
@@ -116,7 +128,29 @@ app.use(cookieParser())
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json({ limit: '1gb' }))
 app.use(bodyParser.text({ limit: '1gb' }))
-app.use(compression())
+// Cache-friendly HTTP responses for OPDS / RESPECT manifests and their
+// resources. Compression must be skipped for these URLs: when active it adds a
+// `Vary: Accept-Encoding` header and switches to chunked transfer (removing
+// Content-Length), which violates the requirement that every manifest resource
+// URL is served byte-for-byte identically, with Content-Length and
+// Last-Modified or ETag, and cache validation (If-None-Match /
+// If-Modified-Since) support.
+app.use(compression({
+  filter: function (req, res) {
+    const url = req.originalUrl || req.url
+    if (CACHE_FRIENDLY_URL_PREFIXES.some(prefix => url.startsWith(prefix))) {
+      return false
+    }
+    return compression.filter(req, res)
+  }
+}))
+// Manifest responses are explicitly cacheable so proxies/operators store them.
+// Validation still happens via the ETag Express generates for res.send, and via
+// Last-Modified/ETag for static files; none of these responses set a Vary header.
+app.use(['/opds', '/respect-app-manifest'], function (req, res, next) {
+  res.setHeader('Cache-Control', 'public, max-age=300')
+  next()
+})
 
 
 
@@ -742,6 +776,20 @@ async function listClientFiles(dirPath, baseDir, ignorePatterns = ['node_modules
   return results
 }
 
+// Stable modification date for OPDS publication metadata. Derived from the
+// mtime of the group's forms.json so the response body — and therefore the ETag
+// used for If-None-Match cache validation — stays stable between requests
+// instead of changing every second (which would defeat HTTP caching).
+async function getFormsModified(formsPath) {
+  try {
+    const stat = await fs.stat(formsPath)
+    return stat.mtime.toISOString()
+  } catch (err) {
+    // forms.json may not exist yet; use a stable epoch value.
+    return new Date(0).toISOString()
+  }
+}
+
 /**
  * OPDS 2.0 Catalog of Groups (RESPECT / UstadMobile format).
  * Returns an OPDS Navigation Feed listing all Tangerine groups.
@@ -860,6 +908,7 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
     } catch (err) {
       forms = []
     }
+    const formsModified = await getFormsModified(formsPath)
 
     // Filter to non-archived, listed forms that also have published online surveys
     const listedForms = forms
@@ -896,7 +945,7 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
           author: groupLabel,
           identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
           language: 'en',
-          modified: new Date().toISOString()
+          modified: formsModified
         },
         links: [
           { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
@@ -970,6 +1019,7 @@ app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, r
     } catch (err) {
       // forms.json not found; use formId as title
     }
+    const formsModified = await getFormsModified(formsPath)
 
     const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
 
@@ -1082,7 +1132,7 @@ app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, r
         author: groupLabel,
         identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
         language: 'en',
-        modified: new Date().toISOString()
+        modified: formsModified
       },
       links: [
         { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
