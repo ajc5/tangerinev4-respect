@@ -5,10 +5,10 @@ module.exports = async (req, res, next) => {
   const errorMessage = `Permission denied at ${req.url}`;
   try {
     const { groupId, formId } = req.params;
-    const { formUploadToken } = req.headers;
+    const formUploadToken = req.headers['formuploadtoken'] || req.headers['formUploadToken'];
     const data =  (await GROUPS_DB.get(groupId)).onlineSurveys || [];
     const formData = data.find(e => e.formId === formId);
-    if(formData && formData.formUploadToken === formUploadToken){
+    if(formData && formData.uploadKey === formUploadToken){
         next();
     } else {
         log.warn(errorMessage);

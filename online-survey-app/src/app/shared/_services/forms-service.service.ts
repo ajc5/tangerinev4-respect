@@ -46,8 +46,7 @@ export class FormsService {
       // TODO: Move this logic to tangy-form so it happens for all responses
       formResponse.groupId = config.groupId
 
-      const headers = new HttpHeaders();
-      headers.set('formUploadToken', config.uploadKey);
+      const headers = new HttpHeaders().set('formUploadToken', config.uploadKey);
       const data = await this.httpClient.post(config.formUploadURL, formResponse, {headers, observe: 'response'}).toPromise();
       return data.status === 200;
     } catch (error) {
