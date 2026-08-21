@@ -39,6 +39,12 @@ RUN mkdir -p client/builds/apk/www && \
 # Fix module links for APK
 RUN sed -i 's/type="module"/type="text\/javascript"/g' /build/client/builds/apk/www/shell/index.html
 
+# ---------- Online Survey App ----------
+COPY online-survey-app/package.json online-survey-app/
+RUN cd online-survey-app && npm install
+COPY online-survey-app/ /build/online-survey-app/
+RUN cd online-survey-app && ./node_modules/.bin/ng build --base-href "./"
+
 # ---------- Tangy Form ----------
 COPY tangy-form/ /build/tangy-form/
 RUN cd /build/tangy-form && npm install
@@ -101,6 +107,8 @@ RUN cd /tangerine/apk-generator && npm link
 COPY online-survey-app/package.json /tangerine/online-survey-app/
 RUN cd /tangerine/online-survey-app && npm install
 COPY online-survey-app/ /tangerine/online-survey-app/
+# Use the freshly-built dist (from Stage 1) for releases - the repo's dist/ may be absent/stale
+COPY --from=angular-builder /build/online-survey-app/dist /tangerine/online-survey-app/dist
 
 # ---------- Tangy Form ----------
 COPY --from=angular-builder /build/tangy-form /tangerine/tangy-form/
