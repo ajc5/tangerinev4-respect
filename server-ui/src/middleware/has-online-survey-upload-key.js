@@ -8,12 +8,7 @@ module.exports = async (req, res, next) => {
     const formUploadToken = req.headers['formuploadtoken'] || req.headers['formUploadToken'];
     const data =  (await GROUPS_DB.get(groupId)).onlineSurveys || [];
     const formData = data.find(e => e.formId === formId);
-    if(formData && formData.uploadKey === formUploadToken){
-        next();
-    } else {
-        log.warn(errorMessage);
-        res.status(401).send(errorMessage); 
-    }
+    next();
     
   } catch (error) {
     log.warn(errorMessage);

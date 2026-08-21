@@ -16,6 +16,12 @@ services:
       context: ..
       dockerfile: dockerhub/Dockerfile.server
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
       - couchdb
     environment:
@@ -86,7 +92,11 @@ services:
     environment:
       - T_COUCHDB_ENDPOINT=http://${T_COUCHDB_USER_ADMIN_NAME:-admin}:${T_COUCHDB_USER_ADMIN_PASS:-password}@couchdb:5984/
     volumes:
-      - tangerine-data:/tangerine
+      - groups-data:/tangerine/groups
+      - client-releases-data:/tangerine/client/releases
+      - client-content-groups-data:/tangerine/client/content/groups
+      - client-content-assets-data:/tangerine/client/content/assets
+      - csv-data:/csv
       - archives-data:/archives
       - state-data:/state
 
