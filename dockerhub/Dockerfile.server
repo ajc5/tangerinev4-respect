@@ -44,7 +44,7 @@ COPY online-survey-app/package.json online-survey-app/
 RUN cd online-survey-app && npm install
 
 COPY online-survey-app/ /build/online-survey-app/
-RUN cd online-survey-app && ./node_modules/.bin/ng build --base-href "./"
+RUN cd online-survey-app && ./node_modules/.bin/ng build
 
 # ============================================================
 # STAGE 2: Server image
