@@ -85,6 +85,12 @@ RUN cordova platform add android@11 && \
 # ============================================================
 FROM alvrme/alpine-android:android-32-jdk11
 
+# TEMP FIX: npm 11 disables git:/-type dependencies by default (EALLOWGIT).
+# Several Tangerine deps are github:-sourced (e.g. cordova-hot-code-push-cli,
+# translation-web-component); re-enable git fetching for the whole stage until
+# they are published to the npm registry.
+ENV npm_config_allow_git=all
+
 RUN apk add --no-cache nodejs npm bash vim curl wget jq git tar unzip gradle && \
     npm update && npm install -g cordova@11.0.0
 
