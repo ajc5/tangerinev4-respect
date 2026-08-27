@@ -181,42 +181,29 @@ export class TangyFormsPlayerComponent implements OnInit {
 
   /**
    * Populate LRS configuration from URL query parameters (endpoint, auth, actor, registration).
-   * Similar to the launch parameter parsing in respect.html.
-   * Values can be JSON-encoded objects/strings; fall back to raw string if parsing fails.
    */
   private populateXapiFromUrlParams(): void {
     console.log('[xAPI Debug] Checking URL query parameters:', window.location.search);
     const urlParams = new URLSearchParams(window.location.search);
-    
-    // Helper to parse a parameter value, trying JSON.parse first (like respect.html)
-    const parseParam = (value: string): any => {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return value;
-      }
-    };
 
-    // Override endpoint and auth from URL if not already provided via @Input
     if (urlParams.has('endpoint')) {
-      this.lrsEndpoint = parseParam(urlParams.get('endpoint')) as string;
+      const endpoint = this.validateEndpoint(urlParams.get('endpoint'));
+      this.lrsEndpoint = endpoint || '';
       this.xapiDebugInfo.endpoint = this.lrsEndpoint;
-      console.log('[xAPI Debug] Endpoint from URL:', this.lrsEndpoint);
+      console.log('[xAPI Debug] Endpoint from URL:', this.lrsEndpoint || '(rejected - not a valid http(s) URL)');
     }
     if (urlParams.has('auth')) {
-      this.lrsAuth = parseParam(urlParams.get('auth')) as string;
+      this.lrsAuth = urlParams.get('auth') || '';
       this.xapiDebugInfo.auth = this.lrsAuth;
       console.log('[xAPI Debug] Auth from URL:', this.lrsAuth);
     }
-    
+
     // Use a provided registration, or leave undefined so generateUUID is used
     if (urlParams.has('registration')) {
-      this.lrsRegistration = parseParam(urlParams.get('registration')) as string;
+      this.lrsRegistration = urlParams.get('registration') || '';
       this.xapiDebugInfo.registration = this.lrsRegistration;
       console.log('[xAPI Debug] Registration from URL:', this.lrsRegistration);
     }
-    
-    // Parse actor from URL params
     if (urlParams.has('actor')) {
       try {
         this.lrsActor = JSON.parse(urlParams.get('actor'));
@@ -226,13 +213,23 @@ export class TangyFormsPlayerComponent implements OnInit {
         console.log('[xAPI Debug] Failed to parse actor from URL');
       }
     }
-    
+
     // Also capture @Input values if set (in case they're set but URL params are not)
     if (this.lrsEndpoint && !this.xapiDebugInfo.endpoint) this.xapiDebugInfo.endpoint = this.lrsEndpoint;
     if (this.lrsAuth && !this.xapiDebugInfo.auth) this.xapiDebugInfo.auth = this.lrsAuth;
-    
+
     if (!urlParams.has('endpoint') && !urlParams.has('auth') && !urlParams.has('registration')) {
       console.log('[xAPI Debug] No xAPI URL parameters found. Using @Input values if provided.');
+    }
+  }
+
+private validateEndpoint(value: string | null): string | undefined {
+    if (!value) return undefined;
+    try {
+      const url = new URL(value);
+      return (url.protocol === 'http:' || url.protocol === 'https:') ? value : undefined;
+    } catch {
+      return undefined;
     }
   }
 

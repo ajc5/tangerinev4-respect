@@ -197,12 +197,24 @@
       const urlParams = new URLSearchParams(window.location.search);
       window.launch = {};
       for (const [key, value] of urlParams.entries()) {
-        if (key === 'endpoint' || key === 'auth' || key === 'actor' || key === 'registration') {
+        if (key === 'actor') {
           try {
             launch[key] = JSON.parse(value);
           } catch (e) {
             launch[key] = value;
           }
+        } else if (key === 'endpoint' || key === 'auth' || key === 'registration') {
+          launch[key] = value;
+        }
+      }
+      if (launch.endpoint) {
+        try {
+          const url = new URL(launch.endpoint);
+          if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            delete launch.endpoint;
+          }
+        } catch (e) {
+          delete launch.endpoint;
         }
       }
       launch.registration = launch.registration ? launch.registration : (function uuid() {
