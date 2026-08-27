@@ -93,6 +93,7 @@ COPY content-sets/ /tangerine/content-sets/
 COPY upgrades/ /tangerine/upgrades/
 COPY scripts/ /tangerine/scripts/
 COPY logo.svg /tangerine/logo.svg
+COPY client-content-assets/ /tangerine/client-content-assets/
 COPY online-survey-app/ /tangerine/online-survey-app/
 
 # Link global commands

@@ -284,7 +284,7 @@ app.get('/usage/:startdate/:enddate', require('./routes/usage'));
 
 // Static assets.
 app.use('/client', express.static('/tangerine/client/dev'));
-app.use('/opds/images/', express.static('/tangerine/client/content/assets'));
+app.use('/opds/images/', express.static('/tangerine/client-content-assets'));
 // app.use('/', express.static('/tangerine/editor/dist/tangerine-editor'));
 
 
