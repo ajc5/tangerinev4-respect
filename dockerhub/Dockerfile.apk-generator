@@ -60,17 +60,23 @@ RUN npm update && npm install -g cordova@11.0.0
 
 WORKDIR /cordova
 COPY cordova/ ./
+# git:/-sourced plugins fail with npm's EALLOWGIT (git packages disabled), so clone
+# them and add from local paths instead of fetching via npm as git dependencies.
+RUN git clone https://github.com/Tangerine-Community/cordova-hot-code-push.git /tmp/cordova-hot-code-push && \
+    git clone https://github.com/brodybits/cordova-plugin-sqlcipher-crypto-batch-connection-manager-core-pro-free.git /tmp/cordova-plugin-sqlcipher && \
+    cd /tmp/cordova-plugin-sqlcipher && git checkout unstable-build-2020-07-15-01
+
 RUN cordova platform add android@11 && \
     cordova plugin add cordova-plugin-geolocation@4.1.0 && \
     cordova plugin add cordova-plugin-camera@6.0.0 && \
     cordova plugin add cordova-plugin-file@7.0.0 && \
     cordova plugin add cordova-plugin-androidx && \
     cordova plugin add cordova-plugin-androidx-adapter && \
-    cordova plugin add github:Tangerine-Community/cordova-hot-code-push && \
+    cordova plugin add /tmp/cordova-hot-code-push && \
     cordova plugin add cordova-plugin-nearby-connections@0.6.1 && \
     cordova plugin add cordova-sms-plugin && \
     cordova plugin add cordova-plugin-android-permissions && \
-    cordova plugin add github:brodybits/cordova-plugin-sqlcipher-crypto-batch-connection-manager-core-pro-free#unstable-build-2020-07-15-01 && \
+    cordova plugin add /tmp/cordova-plugin-sqlcipher && \
     cordova plugin add cordova-sqlite-storage-file && \
     cordova plugin add cordova-plugin-x-socialsharing
 

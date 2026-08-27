@@ -85,7 +85,7 @@ docker compose down -v
 
 ```bash
 cd dockerhub
-./build.sh --push v4.2.0
+./build.sh --push v4.3.0
 ```
 
 That builds all 4 images and pushes them to `tangerine/couchdb`, `tangerine/server`, etc. on Docker Hub.
@@ -93,7 +93,7 @@ That builds all 4 images and pushes them to `tangerine/couchdb`, `tangerine/serv
 ### Build only (no push)
 
 ```bash
-./build.sh v4.2.0
+./build.sh v4.3.0
 ```
 
 ### Alternative: save & load (no registry needed)
@@ -103,13 +103,13 @@ If you don't want a registry, build on your fast machine, then ship the images d
 ```bash
 # On your fast machine — build + save
 cd dockerhub
-./build.sh v4.2.0
-./save.sh v4.2.0
+./build.sh v4.3.0
+./save.sh v4.3.0
 
 # Copy the tangerine-images/ folder to your VM via SCP/rsync
 
 # On your VM — load + run
-./load.sh v4.2.0
+./load.sh v4.3.0
 docker compose up -d
 ```
 
@@ -117,17 +117,17 @@ docker compose up -d
 
 ```bash
 # From the project root
-docker build -f dockerhub/Dockerfile.server -t tangerine/server:v4.2.0 .
-docker push tangerine/server:v4.2.0
+docker build -f dockerhub/Dockerfile.server -t tangerine/server:v4.3.0 .
+docker push tangerine/server:v4.3.0
 
-docker build -f dockerhub/Dockerfile.server-ui -t tangerine/server-ui:v4.2.0 .
-docker push tangerine/server-ui:v4.2.0
+docker build -f dockerhub/Dockerfile.server-ui -t tangerine/server-ui:v4.3.0 .
+docker push tangerine/server-ui:v4.3.0
 
-docker build -f dockerhub/Dockerfile.apk-generator -t tangerine/apk-generator:v4.2.0 .
-docker push tangerine/apk-generator:v4.2.0
+docker build -f dockerhub/Dockerfile.apk-generator -t tangerine/apk-generator:v4.3.0 .
+docker push tangerine/apk-generator:v4.3.0
 
-docker build -f dockerhub/Dockerfile.couchdb -t tangerine/couchdb:v4.2.0 .
-docker push tangerine/couchdb:v4.2.0
+docker build -f dockerhub/Dockerfile.couchdb -t tangerine/couchdb:v4.3.0 .
+docker push tangerine/couchdb:v4.3.0
 ```
 
 ### Multi-architecture builds (AMD64 + ARM64)
@@ -138,7 +138,7 @@ docker buildx inspect --bootstrap
 
 docker buildx build \
   -f dockerhub/Dockerfile.server \
-  -t tangerine/server:v4.2.0 \
+  -t tangerine/server:v4.3.0 \
   -t tangerine/server:latest \
   --platform linux/amd64,linux/arm64 \
   --push \

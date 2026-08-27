@@ -1,6 +1,6 @@
 FROM alvrme/alpine-android:android-32-jdk11
 
-RUN apk add --update nodejs npm
+RUN apk add --update nodejs npm git bash
 # Install Cordova and other useful globals
 RUN npm update && \
     npm install -g cordova@11.0.0
@@ -13,16 +13,22 @@ WORKDIR /tangerine/client/builds/apk
 
 RUN cordova platform add android@11 && sleep 5
 
+# git:/-sourced plugins fail with npm's EALLOWGIT (git packages disabled), so clone
+# them and add from local paths instead of fetching via npm as git dependencies.
+RUN git clone https://github.com/Tangerine-Community/cordova-hot-code-push.git /tmp/cordova-hot-code-push && \
+    git clone https://github.com/brodybits/cordova-plugin-sqlcipher-crypto-batch-connection-manager-core-pro-free.git /tmp/cordova-plugin-sqlcipher && \
+    cd /tmp/cordova-plugin-sqlcipher && git checkout unstable-build-2020-07-15-01
+
 RUN cordova plugin add cordova-plugin-geolocation@4.1.0 --save && sleep 5
 RUN cordova plugin add cordova-plugin-camera@6.0.0 --save && sleep 5
 RUN cordova plugin add cordova-plugin-file@7.0.0 --save && sleep 5
 RUN cordova plugin add cordova-plugin-androidx --save && sleep 5
 RUN cordova plugin add cordova-plugin-androidx-adapter --save && sleep 5
-RUN cordova plugin add github:Tangerine-Community/cordova-hot-code-push --save && sleep 5
+RUN cordova plugin add /tmp/cordova-hot-code-push --save && sleep 5
 RUN cordova plugin add cordova-plugin-nearby-connections@0.6.1 --save && sleep 5
 RUN cordova plugin add cordova-sms-plugin --save && sleep 5
 RUN cordova plugin add cordova-plugin-android-permissions --save && sleep 5
-RUN cordova plugin add github:brodybits/cordova-plugin-sqlcipher-crypto-batch-connection-manager-core-pro-free#unstable-build-2020-07-15-01 --save && sleep 5
+RUN cordova plugin add /tmp/cordova-plugin-sqlcipher --save && sleep 5
 RUN cordova plugin add cordova-sqlite-storage-file --save && sleep 5
 RUN cordova plugin add cordova-plugin-x-socialsharing --save && sleep 5
 
