@@ -672,7 +672,7 @@ keepAlivePaidWorker()
  */
 app.get('/respect-app-manifest', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const manifest = {
       "name": {
           "en-US": "Tangerine"
@@ -800,7 +800,7 @@ async function getFormsModified(formsPath) {
  */
 app.get('/opds/groups', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupsListLib = require('./groups-list.js')
     const GROUPS_DB = new DB('groups')
 
@@ -878,7 +878,7 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
  */
 app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupId = req.params.groupId
 
     // If a respectToken is present, verify the user has access to this group
@@ -983,7 +983,7 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
  */
 app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupId = req.params.groupId
     const formId = req.params.formId
 

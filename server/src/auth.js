@@ -35,7 +35,7 @@ const login = async (req, res) => {
         respectToken = getOrCreateRespectToken(username);
       }
       const respectUrl = respectToken
-        ? `${req.protocol}://${req.get('host')}/respect-app-manifest?respectToken=${respectToken}`
+        ? `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}/respect-app-manifest?respectToken=${respectToken}`
         : null;
       log.info(`${username} login success`);
       return res.status(200).send({ data: { token: jwtToken, respectUrl } });
