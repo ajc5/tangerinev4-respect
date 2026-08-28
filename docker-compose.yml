@@ -56,6 +56,7 @@ services:
         - ./data/client/content/groups:/tangerine/client/content/groups:delegated
         - ./data/client/content/assets:/tangerine/client/content/assets:delegated
         - ./content-sets:/tangerine/content-sets:delegated
+        - ./client-content-assets:/tangerine/client-content-assets:delegated
         - ./server/package.json:/tangerine/server/package.json:delegated
         - ./server/src:/tangerine/server/src:delegated
         - ./client/src:/tangerine/client/src:delegated \
