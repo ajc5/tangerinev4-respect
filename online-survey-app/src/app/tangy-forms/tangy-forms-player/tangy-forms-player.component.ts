@@ -353,11 +353,24 @@ private validateEndpoint(value: string | null): string | undefined {
     try {
       // Use ADL.XAPIWrapper.sendStatements (same as respect.html)
       const res = ADL.XAPIWrapper.sendStatements(statements);
+      const xhr = res && res.xhr;
+      if (xhr) {
+        xhr.addEventListener('load', () => {
+          console.log('[xAPI Debug] XHR status:', xhr.status, xhr.statusText);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('[xAPI Debug] Statements DELIVERED to LRS:', xhr.responseText);
+          } else {
+            console.error('[xAPI Debug] Statements REJECTED by LRS:', xhr.status, xhr.statusText, 'body:', xhr.responseText);
+          }
+        });
+        xhr.addEventListener('error', () => {
+          console.error('[xAPI Debug] Statements FAILED to send (blocked/network/CORS/mixed-content). readyState:', xhr.readyState, 'status:', xhr.status);
+        });
+      }
       console.log('[xAPI Debug] Submission result:', res, statements);
     } catch (error) {
       console.error('[xAPI Debug] Submission failed:', error);
     }
-  }
 
   private generateUUID(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
