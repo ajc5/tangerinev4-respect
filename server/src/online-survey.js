@@ -41,7 +41,19 @@ const saveResponse = async (req, res) => {
     const db = new DB(groupId);
     const data = req.body;
     data.formId = formId;
-    await db.post(data);
+    try {
+      await db.post(data);
+    } catch (postError) {
+      // An online-survey response uses a client-generated _id, so a conflict
+      // means this EXACT response was already saved (e.g. an offline outbox
+      // retrying a submission that was already delivered, or a double POST from
+      // concurrent flushes). Treat it as success so replays are idempotent
+      // instead of returning a 500 that leaves the submission stuck in the queue.
+      if (postError && (postError.status === 409 || postError.error === 'conflict')) {
+        return res.status(200).send({ data: 'Response Saved Successfully' });
+      }
+      throw postError;
+    }
     return res.status(200).send({ data: 'Response Saved Successfully' });
   } catch (error) {
     console.error(error);

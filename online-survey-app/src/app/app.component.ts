@@ -1,5 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { AppConfigService } from './shared/_services/app-config.service';
+import { OfflineOutboxService } from './shared/_services/offline-outbox.service';
 import { _TRANSLATE } from './shared/_services/translation-marker';
 import { AuthenticationService } from './core/auth/_services/authentication.service';
 import { Router } from '@angular/router';
@@ -9,7 +10,7 @@ import { Router } from '@angular/router';
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
-export class AppComponent implements OnInit{
+export class AppComponent implements OnInit, OnDestroy{
   languageDirection: string;
   appName: string;
   hasHelpLink: boolean = false;
@@ -17,15 +18,22 @@ export class AppComponent implements OnInit{
   sessionTimeoutCheckTimerID;
   isConfirmDialogActive = false;
   loggedIn = false;
+  private _onlineHandler: any;
 
   constructor(
     private appConfigService: AppConfigService, 
     private authenticationService: AuthenticationService,
+    private offlineOutbox: OfflineOutboxService,
     private router: Router
   ){
   }
 
   async ngOnInit(): Promise<any>{
+    // Best-effort delivery of any submissions queued while offline: flush on
+    // app start and whenever the browser reports connectivity is back.
+    this.flushOutbox();
+    this._onlineHandler = () => this.flushOutbox();
+    window.addEventListener('online', this._onlineHandler);
     this.authenticationService.currentUserLoggedIn$.subscribe(async isLoggedIn => {
       if (isLoggedIn) {
         this.loggedIn = isLoggedIn;
@@ -84,5 +92,21 @@ export class AppComponent implements OnInit{
     await this.authenticationService.logout();
     this.loggedIn = false;
     this.router.navigate(['/survey-login']);
+  }
+
+  private flushOutbox(): void {
+    this.offlineOutbox.flush().then(remaining => {
+      if (remaining > 0) {
+        console.log('[Offline]', remaining, 'submission(s) still waiting for connectivity.');
+      }
+    }).catch(error => {
+      console.warn('[Offline] Outbox flush error:', error);
+    });
+  }
+
+  ngOnDestroy() {
+    if (this._onlineHandler) {
+      window.removeEventListener('online', this._onlineHandler);
+    }
   }
 }

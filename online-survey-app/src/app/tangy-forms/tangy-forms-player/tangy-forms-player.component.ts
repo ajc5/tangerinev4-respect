@@ -1,7 +1,9 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, ElementRef, OnInit, ViewChild, Input } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild, Input, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsService } from 'src/app/shared/_services/forms-service.service';
+import { AppConfigService } from 'src/app/shared/_services/app-config.service';
+import { OfflineOutboxService } from 'src/app/shared/_services/offline-outbox.service';
 import { CaseService } from 'src/app/case/services/case.service';
 import { TangyFormService } from '../tangy-form.service';
 declare const ADL: any;
@@ -13,7 +15,7 @@ const sleep = (milliseconds) => new Promise((res) => setTimeout(() => res(true),
   templateUrl: './tangy-forms-player.component.html',
   styleUrls: ['./tangy-forms-player.component.css']
 })
-export class TangyFormsPlayerComponent implements OnInit {
+export class TangyFormsPlayerComponent implements OnInit, OnDestroy {
   @ViewChild('container', {static: true}) container: ElementRef;
   @Input('response') response;
 
@@ -55,12 +57,18 @@ export class TangyFormsPlayerComponent implements OnInit {
 
   throttledSaveLoaded
   throttledSaveFiring
+
+  // Registered handler for the browser 'online' event so we can remove it on
+  // destroy (the component is reused across form navigations).
+  private _onlineHandler: any;
   
   constructor(
     private route: ActivatedRoute, 
     private formsService: FormsService, 
     private router: Router, 
     private httpClient:HttpClient,
+    private appConfigService: AppConfigService,
+    private offlineOutbox: OfflineOutboxService,
     private caseService: CaseService,
     private tangyFormService: TangyFormService
   ) { 
@@ -75,6 +83,12 @@ export class TangyFormsPlayerComponent implements OnInit {
 
   async ngOnInit(): Promise<any> {
     this.window = window;
+
+    // Best-effort: deliver any submissions that were queued while offline.
+    // We flush on startup and whenever the browser reports we are back online.
+    this.flushOutbox();
+    this._onlineHandler = () => this.flushOutbox();
+    window.addEventListener('online', this._onlineHandler);
 
     // Parse xAPI launch parameters from URL query string (like respect.html)
     this.populateXapiFromUrlParams();
@@ -168,17 +182,23 @@ export class TangyFormsPlayerComponent implements OnInit {
     } else {
       tangyForm.addEventListener('after-submit', async (event) => {
         event.preventDefault();
+        const formResponse = event.target.response;
         try {
-          if (await this.formsService.uploadFormResponse(event.target.response)){
-            // Send xAPI statements to LRS if configured
-            await this.sendXapiStatements(event.target);
-            this.router.navigate(['/form-submitted-success']);
-          } else {
-            alert('Form could not be submitted. Please retry');
+          // Try to deliver straight to the Tangerine server. If that fails
+          // (offline / unreachable / rejected), the completed response is kept
+          // in the offline outbox and replayed when connectivity returns.
+          const uploaded = await this.formsService.uploadFormResponse(formResponse);
+          if (!uploaded) {
+            await this.queueFormResponseForOffline(formResponse);
           }
         } catch (error) {
           console.error(error);
+          await this.queueFormResponseForOffline(formResponse);
         }
+        // Always attempt xAPI delivery (statements are queued in the outbox if
+        // offline), then let the user proceed regardless of connectivity.
+        await this.sendXapiStatements(event.target);
+        this.router.navigate(['/form-submitted-success']);
       });
     }
   }
@@ -354,6 +374,19 @@ private validateEndpoint(value: string | null): string | undefined {
     console.log('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
     console.log('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
 
+    // If the device is offline, don't attempt delivery now - queue the whole
+    // batch (with its LRS endpoint/auth and optional IPC package) so it can be
+    // replayed from the outbox when connectivity returns.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      console.log('[xAPI Debug] Offline - queueing', statements.length, 'statements for later delivery.');
+      try {
+        await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);
+      } catch (queueError) {
+        console.error('[xAPI Debug] Failed to queue statements:', queueError);
+      }
+      return;
+    }
+
     // If we are running inside the native Tangerine (Capacitor) app and the
     // launch carried a launcher IPC package, relay the statements to the
     // RESPECT launcher via TangyCache.forwardXapiStatements so it can forward
@@ -374,6 +407,12 @@ private validateEndpoint(value: string | null): string | undefined {
         console.log('[xAPI Debug] Statements relayed to native app for LRS delivery');
       } catch (error) {
         console.error('[xAPI Debug] Statements relay FAILED:', error);
+        console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
+        try {
+          await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);
+        } catch (queueError) {
+          console.error('[xAPI Debug] Failed to queue statements:', queueError);
+        }
       }
       return;
     }
@@ -399,11 +438,55 @@ private validateEndpoint(value: string | null): string | undefined {
         });
         xhr.addEventListener('error', () => {
           console.error('[xAPI Debug] Statements FAILED to send (blocked/network/CORS/mixed-content). readyState:', xhr.readyState, 'status:', xhr.status);
+          console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
+          this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage)
+            .catch(e => console.error('[xAPI Debug] Failed to queue statements:', e));
         });
       }
       console.log('[xAPI Debug] Submission result:', res, statements);
     } catch (error) {
       console.error('[xAPI Debug] Submission failed:', error);
+      console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
+      this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage)
+        .catch(e => console.error('[xAPI Debug] Failed to queue statements:', e));
+    }
+  }
+
+  /**
+   * Keep a completed form response in the offline outbox when it could not be
+   * uploaded to the Tangerine server. Uses the app's own formUploadURL/uploadKey
+   * from app-config.json so it can be replayed later exactly like a normal
+   * submission.
+   */
+  private async queueFormResponseForOffline(formResponse: any): Promise<void> {
+    try {
+      const config = await this.appConfigService.getAppConfig();
+      if (!config || !config.formUploadURL || !config.uploadKey) {
+        console.warn('[Offline] No formUploadURL/uploadKey available - completed response cannot be queued for upload.');
+        return;
+      }
+      const response = { ...formResponse, groupId: config.groupId };
+      const pending = await this.offlineOutbox.queueFormResponse(response, config.formUploadURL, config.uploadKey);
+      console.log('[Offline] Form response queued for delivery when back online (pending:', pending + ').');
+    } catch (error) {
+      console.error('[Offline] Could not queue form response for later upload:', error);
+    }
+  }
+
+  /** Try to deliver anything queued while offline (fires on startup + 'online'). */
+  private flushOutbox(): void {
+    this.offlineOutbox.flush().then(remaining => {
+      if (remaining > 0) {
+        console.log('[Offline]', remaining, 'submission(s) still waiting for connectivity.');
+      }
+    }).catch(error => {
+      console.warn('[Offline] Outbox flush error:', error);
+    });
+  }
+
+  ngOnDestroy() {
+    if (this._onlineHandler) {
+      window.removeEventListener('online', this._onlineHandler);
     }
   }
 

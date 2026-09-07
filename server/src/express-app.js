@@ -152,6 +152,24 @@ app.use(['/opds', '/respect-app-manifest'], function (req, res, next) {
   next()
 })
 
+// Per-form OPDS resources (publication detail + tincan.xml) are treated as
+// immutable so the RESPECT launcher's HTTP cache (OkHttp/UstadCache) serves them
+// from cache OFFLINE without attempting revalidation. Revalidation needs the
+// network, and when the form was downloaded more than max-age ago (previously
+// 300s) the launcher fails offline with "exception validating" -> network error.
+// Feed/catalog LIST URLs (/opds/groups, /opds/forms, /opds/groups/:groupId and
+// /respect-app-manifest*) are intentionally NOT included here so newly published
+// forms still appear when the device is online. This mirrors the /releases assets
+// (Cache-Control: public, max-age=31536000, immutable) which already play offline.
+app.use([
+  '/opds/groups/:groupId/:formId',
+  '/opds/forms/:groupId/:formId',
+  '/opds/tincan.xml/:groupId/:formId'
+], function (req, res, next) {
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  next()
+})
+
 
 
   app.get('/version',
@@ -314,7 +332,7 @@ app.get('/usage/:startdate/:enddate', require('./routes/usage'));
 
 // Static assets.
 app.use('/client', express.static('/tangerine/client/dev'));
-app.use('/opds/images/', express.static('/tangerine/client-content-assets'));
+app.use('/opds/images/', express.static('/tangerine/client-content-assets', { maxAge: '1y', immutable: true }));
 // app.use('/', express.static('/tangerine/editor/dist/tangerine-editor'));
 
 
@@ -937,7 +955,9 @@ app.use('/opds/content/:groupId', hasRespectToken, function (req, res, next) {
     return res.status(403).send({ error: 'Access denied to this group' })
   }
   const contentPath = `/tangerine/groups/${groupId}/client`
-  return express.static(contentPath).apply(this, arguments)
+  // Immutable cache so a launcher/proxy that pre-caches OPDS resources (the
+  // online survey + form content) can serve them offline without revalidation.
+  return express.static(contentPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
 })
 
 // MIME type lookup for common file extensions used in form content.
