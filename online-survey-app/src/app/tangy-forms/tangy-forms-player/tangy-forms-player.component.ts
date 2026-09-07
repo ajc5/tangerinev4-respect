@@ -33,12 +33,17 @@ export class TangyFormsPlayerComponent implements OnInit {
   // Actor from URL params
   private lrsActor: any
 
+  // Package name of the RESPECT launcher IPC service to relay xAPI statements
+  // to (xapiIpcPackage URL param). Only present when launched by the launcher.
+  private lrsIpcPackage: string
+
   // xAPI debug info to display in the UI
   xapiDebugInfo = {
     endpoint: '',
     auth: '',
     registration: '',
     actor: '',
+    ipcPackage: '',
   }
 
   formId: string;
@@ -197,6 +202,11 @@ export class TangyFormsPlayerComponent implements OnInit {
       this.xapiDebugInfo.auth = this.lrsAuth;
       console.log('[xAPI Debug] Auth from URL:', this.lrsAuth);
     }
+    if (urlParams.has('xapiIpcPackage')) {
+      this.lrsIpcPackage = urlParams.get('xapiIpcPackage') || '';
+      this.xapiDebugInfo.ipcPackage = this.lrsIpcPackage;
+      console.log('[xAPI Debug] xapiIpcPackage from URL:', this.lrsIpcPackage);
+    }
 
     // Use a provided registration, or leave undefined so generateUUID is used
     if (urlParams.has('registration')) {
@@ -343,6 +353,30 @@ private validateEndpoint(value: string | null): string | undefined {
 
     console.log('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
     console.log('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
+
+    // If we are running inside the native Tangerine (Capacitor) app and the
+    // launch carried a launcher IPC package, relay the statements to the
+    // RESPECT launcher via TangyCache.forwardXapiStatements so it can forward
+    // them to the LRS (adding assignment context when launched from an
+    // assignment). Direct LRS POSTing via ADL only works inside the launcher's
+    // own WebView / a plain browser, where no native IPC relay exists.
+    const cap = this.window ? this.window.Capacitor : null;
+    const tangyCache = cap && cap.Plugins && cap.Plugins.TangyCache;
+    if (tangyCache && this.lrsEndpoint && this.lrsAuth && this.lrsIpcPackage) {
+      console.log('[xAPI Debug] Relaying', statements.length, 'statements via TangyCache to ipcPackage:', this.lrsIpcPackage);
+      try {
+        await tangyCache.forwardXapiStatements({
+          endpoint: this.lrsEndpoint,
+          auth: this.lrsAuth,
+          ipcPackage: this.lrsIpcPackage,
+          statementsJson: JSON.stringify(statements)
+        });
+        console.log('[xAPI Debug] Statements relayed to native app for LRS delivery');
+      } catch (error) {
+        console.error('[xAPI Debug] Statements relay FAILED:', error);
+      }
+      return;
+    }
 
     // Configure ADL wrapper (same as in respect.html)
     ADL.XAPIWrapper.changeConfig({

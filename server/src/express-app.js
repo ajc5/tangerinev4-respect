@@ -190,6 +190,36 @@ app.get('/users', isAuthenticated, permit(['can_view_users_list']), getAllUsers)
 app.get('/users/byUsername/:username', isAuthenticated, getUserByUsername);
 app.get('/users/findOneUser/:username', isAuthenticated, findOneUserByUsername);
 app.get('/users/findMyUser/', isAuthenticated, findMyUser);
+// Returns the current user's RESPECT URL (and token). Works for all users,
+// including user1, whose token lives in the server's in-memory cache rather
+// than the users DB.
+app.get('/users/respectUrl', isAuthenticated, async function (req, res) {
+  try {
+    const { getOrCreateRespectToken } = require('./respect-token-cache')
+    const { findUserByUsername } = require('./auth')
+    const { v4: uuidV4 } = require('uuid')
+    const username = req.user.name
+    let respectToken = null
+    const user = await findUserByUsername(username)
+    if (user) {
+      // Generate respectToken on-the-fly if missing (handles existing users)
+      if (!user.respectToken) {
+        user.respectToken = uuidV4()
+        await USERS_DB.put(user)
+      }
+      respectToken = user.respectToken
+    } else if (username === process.env.T_USER1) {
+      respectToken = getOrCreateRespectToken(username)
+    }
+    const respectUrl = respectToken
+      ? `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}/respect-app-manifest/v2?respectToken=${respectToken}`
+      : null
+    res.status(200).send({ data: { respectToken, respectUrl } })
+  } catch (error) {
+    console.error(error)
+    res.status(500).send({ data: 'Could not get RESPECT URL' })
+  }
+});
 app.put('/users/updateMyUser/', isAuthenticated, updateMyUser);
 app.get('/users/userExists/:username', isAuthenticated, checkIfUserExistByUsername);
 app.post('/users/register-user', isAuthenticated, permit(['can_create_users']), registerUser);
@@ -667,36 +697,229 @@ keepAlivePaidWorker()
  * OPDS catalog of learning units (forms).
  *
  * @route GET /respect-app-manifest
- * @route GET /respect-app-manifest/:groupId
  * @returns {object} RespectAppManifest JSON
  */
+/**
+ * Build a RESPECT launchable-app manifest (same shape as the original
+ * /respect-app-manifest response). Shared by the Tangerine app manifest, the
+ * parallel RESPECT app manifest (/v2), and per-form manifests.
+ */
+function buildRespectAppManifest(name, description, learningUnits, defaultLaunchUri) {
+  return {
+    "name": {
+        "en-US": name
+    },
+    "description": {
+        "en-US": description
+    },
+    "license": "AGPL-3.0-or-later",
+    "icon": "https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w",
+    "website": "https://www.tangerinecentral.org",
+    "learningUnits": learningUnits,
+    "defaultLaunchUri": defaultLaunchUri,
+
+    "android": {
+        "packageId": "org.tangerinecentral.tangerine",
+        "stores": ["https://play.google.com/store/apps/details?id=org.tangerinecentral.tangerine"],
+        "sourceCode": "https://github.com/Tangerine-Community/Tangerine"
+    }
+  }
+}
+
+// --- Current RESPECT spec helpers (UstadMobile/Respect README_LAUNCHABLE_APP.md) ---
+
+const TANGERINE_APP_ICON = 'https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w'
+const REL_TINCAN_XML = 'https://id.openeel.org/rel/tincanxml'
+const REL_LAUNCHABLE_APP = 'https://id.openeel.org/rel/launchable-app'
+const REL_APP_LAUNCH_URI = 'https://id.openeel.org/rel/app-launch-uri'
+const SCHEMA_LAUNCHABLE_APP = 'https://id.openeel.org/schema/launchable-app'
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function formOnlineSurveyUrl(baseUrl, groupId, formId) {
+  return `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
+}
+
+function formTinCanXmlUrl(baseUrl, groupId, formId, respectToken) {
+  return `${baseUrl}/opds/tincan.xml/${groupId}/${formId}?respectToken=${respectToken}`
+}
+
+function formLaunchableAppManifestUrl(baseUrl, respectToken) {
+  return `${baseUrl}/respect-app-manifest/v2?respectToken=${respectToken}`
+}
+
+/**
+ * Launchable-app manifest per the CURRENT RESPECT spec (README_LAUNCHABLE_APP.md):
+ * a Readium Web Publication Manifest describing the app.
+ *
+ * The app MAY link a default catalog of learning units via rel=collection
+ * (an OPDS feed). This is how the launcher's Add-app flow exposes an app's
+ * units for browsing - the launcher only adds apps; units are reached through
+ * the app's collection. Each unit (form) is also published as its own OPDS
+ * publication with a tincan.xml link so it can be launched directly with xAPI.
+ */
+function buildLaunchableAppManifest(name, description, manifestUrl, appLaunchUri, collectionUrl) {
+  const links = [
+    { rel: 'self', href: manifestUrl, type: 'application/opds-publication+json' },
+    { rel: REL_APP_LAUNCH_URI, href: appLaunchUri }
+  ]
+  if (collectionUrl) {
+    links.push({ rel: 'collection', href: collectionUrl, type: 'application/opds+json' })
+  }
+  return {
+    metadata: {
+      '@type': SCHEMA_LAUNCHABLE_APP,
+      title: name,
+      author: {
+        name: 'Tangerine'
+      },
+      identifier: manifestUrl,
+      language: 'en-US'
+    },
+    links,
+    images: [
+      { href: TANGERINE_APP_ICON, type: 'image/png' }
+    ]
+  }
+}
+
 app.get('/respect-app-manifest', hasRespectToken, async function (req, res) {
   try {
     const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    const manifest = {
-      "name": {
-          "en-US": "Tangerine"
-      },
-      "description": {
-          "en-US": "Tangerine data collection and reporting platform"
-      },
-      "license": "AGPL-3.0-or-later",
-      "icon": "https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w",
-      "website": "https://www.tangerinecentral.org",
-      "learningUnits": `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`,
-      "defaultLaunchUri": `${baseUrl}`,
-
-      "android": {
-          "packageId": "org.tangerinecentral.tangerine",
-          "stores": ["https://play.google.com/store/apps/details?id=org.tangerinecentral.tangerine"],
-          "sourceCode": "https://github.com/Tangerine-Community/Tangerine"
-      }
-    }
+    // Original manifest: links to the groups catalog for the Tangerine app.
+    const manifest = buildRespectAppManifest(
+      'Tangerine',
+      'Tangerine data collection and reporting platform',
+      `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`,
+      `${baseUrl}`
+    )
     res.set('Content-Type', 'application/json')
     res.send(manifest)
   } catch (error) {
     console.error('Error generating Respect App Manifest:', error)
     res.status(500).send({ error: 'Failed to generate Respect App Manifest' })
+  }
+})
+
+/**
+ * RESPECT launchable-app manifest (parallel /v2) per the CURRENT spec
+ * (README_LAUNCHABLE_APP.md). Describes Tangerine as an app. Its default
+ * collection (rel=collection) is the hierarchical groups/forms catalog
+ * (/opds/groups), so adding this app in the launcher lets users browse groups
+ * and the forms within them; each form publication links its own tincan.xml so
+ * tapping one launches it with xAPI.
+ *
+ * @route GET /respect-app-manifest/v2
+ * @returns {object} launchable-app manifest JSON
+ */
+app.get('/respect-app-manifest/v2', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
+    const manifestUrl = `${baseUrl}/respect-app-manifest/v2?respectToken=${req.query.respectToken}`
+    const manifest = buildLaunchableAppManifest(
+      'Tangerine',
+      'Tangerine data collection and reporting platform',
+      manifestUrl,
+      baseUrl,
+      `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`
+    )
+    res.set('Content-Type', 'application/json')
+    res.send(manifest)
+  } catch (error) {
+    console.error('Error generating Respect App Manifest (v2):', error)
+    res.status(500).send({ error: 'Failed to generate Respect App Manifest (v2)' })
+  }
+})
+
+
+/**
+ * Per-form RESPECT endpoint.
+ * Returns the form's OPDS publication manifest (a launchable learning unit) so
+ * an admin can add / launch a SINGLE form directly in the launcher - the same
+ * way you'd share a link to a Google Doc. The publication links to the form's
+ * own tincan.xml so the launcher can launch it with xAPI.
+ *
+ * @route GET /respect-app-manifest/:groupId/:formId
+ * @returns {object} OPDS publication manifest JSON
+ */
+app.get('/respect-app-manifest/:groupId/:formId', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
+    const groupId = req.params.groupId
+    const formId = req.params.formId
+
+    // If a respectToken is present, verify the user has access to this group
+    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+      return res.status(403).send({ error: 'Access denied to this group' })
+    }
+
+    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/forms')
+    res.set('Content-Type', 'application/opds-publication+json')
+    res.send(publication)
+  } catch (error) {
+    console.error('Error generating Respect App Manifest for form:', error)
+    res.status(500).send({ error: 'Failed to generate Respect App Manifest for form' })
+  }
+})
+
+/**
+ * Serve a form's tincan.xml (Rustici launch method). Each published form is a
+ * learning unit; its OPDS publication links (rel=launch-tincanxml) here. The
+ * launcher reads the activity id and <launch> URL from this file, then appends
+ * xAPI launch params (endpoint/auth/actor/activity_id) to the launch URL so the
+ * online-survey-app can send statements back to the LRS.
+ *
+ * @route GET /opds/tincan.xml/:groupId/:formId
+ * @returns {application/xml} tincan.xml
+ */
+app.get('/opds/tincan.xml/:groupId/:formId', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
+    const groupId = req.params.groupId
+    const formId = req.params.formId
+
+    // If a respectToken is present, verify the user has access to this group
+    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+      return res.status(403).send({ error: 'Access denied to this group' })
+    }
+
+    // Read forms.json to find the form definition for a friendly title
+    let formTitle = formId
+    try {
+      const { formsPath } = await getGroupMetadata(groupId)
+      const forms = await fs.readJson(formsPath)
+      const form = forms.find(f => f.id === formId)
+      if (form && form.title) {
+        formTitle = form.title
+      }
+    } catch (err) {
+      // forms.json not found; use formId as title
+    }
+
+    const activityId = `${baseUrl}/opds/forms/${groupId}/${formId}`
+    const launchUrl = formOnlineSurveyUrl(baseUrl, groupId, formId)
+    const tincanXml = `<?xml version="1.0" encoding="UTF-8"?>
+<tincan xmlns="http://projecttincan.com/tincan.xsd">
+  <activities>
+    <activity id="${escapeXml(activityId)}" type="http://activitystrea.ms/schema/1.0/game">
+      <name>${escapeXml(formTitle)}</name>
+      <description lang="en-US">${escapeXml(`Tangerine form: ${formTitle}`)}</description>
+      <launch lang="en-US">${escapeXml(launchUrl)}</launch>
+    </activity>
+  </activities>
+</tincan>`
+    res.set('Content-Type', 'application/xml')
+    res.send(tincanXml)
+  } catch (error) {
+    console.error('Error generating tincan.xml for form:', error)
+    res.status(500).send({ error: 'Failed to generate tincan.xml for form' })
   }
 })
 
@@ -974,9 +1197,323 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
 })
 
 /**
- * OPDS 2.0 Publication Detail for a Form.
- * Returns full publication metadata, links, images, and resources
- * for a single form, pointing to the online-survey-app URL.
+ * Shared helper: load group metadata (label, published online-survey form IDs)
+ * and the path to the group's forms.json.
+ */
+async function getGroupMetadata(groupId) {
+  const GROUPS_DB = new DB('groups')
+  const formsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
+  let groupLabel = groupId
+  let publishedFormIds = []
+  try {
+    const groupDoc = await GROUPS_DB.get(groupId)
+    groupLabel = groupDoc.label || groupId
+    const onlineSurveys = groupDoc.onlineSurveys || []
+    publishedFormIds = onlineSurveys.filter(s => s.published).map(s => s.formId)
+  } catch (err) {
+    // Group doc may not exist; continue with groupId as label
+  }
+  return { groupLabel, publishedFormIds, formsPath }
+}
+
+/**
+ * Shared helper: read forms.json and return the non-archived, listed forms that
+ * also have a published online survey, along with the stable modified date.
+ */
+async function getListedPublishedForms(formsPath, publishedFormIds) {
+  let forms = []
+  try {
+    forms = await fs.readJson(formsPath)
+  } catch (err) {
+    // forms.json may not exist; use an empty list
+  }
+  const formsModified = await getFormsModified(formsPath)
+  const listedForms = forms
+    .filter(f => !f.archived && f.listed !== false && publishedFormIds.includes(f.id))
+    .sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id))
+  return { forms, formsModified, listedForms }
+}
+
+/**
+ * Build the base OPDS publication object (metadata, links, images) for a form.
+ * Used by the flat /opds/forms catalog so every form is listed directly (no
+ * groups nesting), matching the RESPECT "list of learning units" model.
+ */
+async function buildFormPublication(baseUrl, groupId, groupLabel, form, formsModified, respectToken) {
+  const formId = form.id
+  const formTitle = form.title || formId
+  const onlineSurveyUrl = formOnlineSurveyUrl(baseUrl, groupId, formId)
+  const tincanXmlUrl = formTinCanXmlUrl(baseUrl, groupId, formId, respectToken)
+  const selfUrl = `${baseUrl}/opds/forms/${groupId}/${formId}?respectToken=${respectToken}`
+
+  const images = []
+  if (form.cover) {
+    images.push({
+      href: `${baseUrl}/opds/images/${form.cover}`,
+      type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    })
+  } else {
+    images.push({
+      href: `${baseUrl}/opds/images/form.png`,
+      type: 'image/png'
+    })
+  }
+
+  return {
+    metadata: {
+      '@type': 'http://schema.org/Game',
+      title: formTitle,
+      author: groupLabel,
+      identifier: selfUrl,
+      language: 'en',
+      modified: formsModified
+    },
+    links: [
+      { rel: 'self', href: selfUrl, type: 'application/opds-publication+json' },
+      { rel: REL_TINCAN_XML, href: tincanXmlUrl, type: 'application/xml' },
+      { rel: REL_LAUNCHABLE_APP, href: formLaunchableAppManifestUrl(baseUrl, respectToken), type: 'application/opds-publication+json' },
+      { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
+    ],
+    images,
+    readingOrder: [
+      { href: onlineSurveyUrl, type: 'text/html' }
+    ]
+  }
+}
+
+/**
+ * Build the full OPDS publication for a single form, including all resources
+ * required to render the online survey offline. Shared by the flat
+ * /opds/forms/:groupId/:formId route and the legacy /opds/groups/:groupId/:formId route.
+ *
+ * @param basePath - URL prefix for self/identifier links: 'opds/forms' or 'opds/groups'
+ */
+async function buildFormPublicationDetail(baseUrl, groupId, formId, respectToken, basePath = 'opds/forms') {
+  const { groupLabel, formsPath } = await getGroupMetadata(groupId)
+
+  // Read forms.json to find the form definition
+  let form = null
+  let formTitle = formId
+  try {
+    const forms = await fs.readJson(formsPath)
+    form = forms.find(f => f.id === formId)
+    if (form && form.title) {
+      formTitle = form.title
+    }
+  } catch (err) {
+    // forms.json not found; use formId as title
+  }
+  const formsModified = await getFormsModified(formsPath)
+
+  const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
+
+  // Build images from form definition
+  const images = []
+  if (form && Array.isArray(form.images)) {
+    for (const img of form.images) {
+      const href = img.href.startsWith('http') ? img.href : `${baseUrl}/opds/images/${img.href}`
+      images.push({
+        href,
+        type: img.type || 'image/jpeg',
+        ...(img.height ? { height: img.height } : {}),
+        ...(img.width ? { width: img.width } : {})
+      })
+    }
+  } else if (form && form.cover) {
+    images.push({
+      href: `${baseUrl}/opds/images/${form.cover}`,
+      type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    })
+  } else {
+    images.push({
+      href: `${baseUrl}/opds/images/form.png`,
+      type: 'image/png'
+    })
+  }
+
+  // Build resources: list all files required to render the online survey form.
+  // This includes both the Angular app shell files (from the dist) and the
+  // group content files (from the client directory). URLs match what the
+  // browser actually requests when loading the online survey, so an HTTP
+  // proxy can pre-cache them for offline use.
+  const resources = []
+  const releaseBaseUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}`
+  const assetsBaseUrl = `${releaseBaseUrl}/assets`
+  const clientDir = `/tangerine/groups/${groupId}/client`
+  const distDir = '/tangerine/online-survey-app/dist/online-survey-app'
+
+  // Helper: add a resource at the assets/ path.
+  function addAssetResource(relativePath, mimeType) {
+    resources.push({ href: `${assetsBaseUrl}/${relativePath}`, type: mimeType })
+  }
+  // Helper: add a resource at the release root path.
+  function addRootResource(relativePath, mimeType) {
+    resources.push({ href: `${releaseBaseUrl}/${relativePath}`, type: mimeType })
+  }
+
+  // 1. App shell files from the online-survey-app dist (runtime.js, main.js, etc.).
+  try {
+    const distFiles = await listClientFiles(distDir, distDir, [])
+    for (const file of distFiles) {
+      addRootResource(file.relativePath, file.mimeType)
+    }
+  } catch (err) {
+    console.error(`Error listing dist files:`, err)
+  }
+
+  // 2. Group client content files (form HTML, translations, custom scripts, media, etc.).
+  //    The release-online-survey-app.sh script maps:
+  //      client/<formId>/*.html  →  assets/form/<filename>
+  //      everything else         →  assets/<relativePath>
+  try {
+    const clientFiles = await listClientFiles(clientDir, clientDir)
+    for (const file of clientFiles) {
+      // Form HTML files go to assets/form/ (matching release-online-survey-app.sh).
+      if (file.relativePath.startsWith(`${formId}/`)) {
+        const filename = path.basename(file.relativePath)
+        addAssetResource(`form/${filename}`, file.mimeType)
+      } else {
+        addAssetResource(file.relativePath, file.mimeType)
+      }
+    }
+  } catch (err) {
+    console.error(`Error listing client files for group ${groupId}:`, err)
+  }
+
+  // 3. Tangerine-level translations (copied by release-online-survey-app.sh).
+  const tangerineTranslationsDir = '/tangerine/translations'
+  try {
+    const translationFiles = await listClientFiles(tangerineTranslationsDir, tangerineTranslationsDir, [])
+    for (const file of translationFiles) {
+      addAssetResource(file.relativePath, file.mimeType)
+    }
+  } catch (err) {
+    // Translations dir may not exist; skip.
+  }
+
+  // 4. Tangy-form library files (web components for tangy-form, tangy-input, etc.).
+  //    Needed to render form items offline.
+  const tangyFormDir = '/tangerine/tangy-form'
+  try {
+    const dirExists = await fs.pathExists(tangyFormDir)
+    if (dirExists) {
+      const tangyFormFiles = await listClientFiles(tangyFormDir, tangyFormDir, ['node_modules', 'test', 'demo', 'docs', '.github'])
+      console.log(`OPDS: Found ${tangyFormFiles.length} tangy-form files for group ${groupId}`)
+      for (const file of tangyFormFiles) {
+        addAssetResource(`tangy-form/${file.relativePath}`, file.mimeType)
+      }
+    } else {
+      console.warn(`OPDS: tangy-form dir not found at ${tangyFormDir}`)
+    }
+  } catch (err) {
+    console.error('Error listing tangy-form files:', err)
+  }
+
+  return {
+    metadata: {
+      '@type': 'http://schema.org/Game',
+      title: formTitle,
+      author: groupLabel,
+      identifier: `${baseUrl}/${basePath}/${groupId}/${formId}?respectToken=${respectToken}`,
+      language: 'en',
+      modified: formsModified
+    },
+    links: [
+      { rel: 'self', href: `${baseUrl}/${basePath}/${groupId}/${formId}?respectToken=${respectToken}`, type: 'application/opds-publication+json' },
+      { rel: REL_TINCAN_XML, href: formTinCanXmlUrl(baseUrl, groupId, formId, respectToken), type: 'application/xml' },
+      { rel: REL_LAUNCHABLE_APP, href: formLaunchableAppManifestUrl(baseUrl, respectToken), type: 'application/opds-publication+json' },
+      { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
+    ],
+    images,
+    readingOrder: [
+      { href: onlineSurveyUrl, type: 'text/html' }
+    ],
+    resources
+  }
+}
+
+/**
+ * OPDS 2.0 Flat Catalog of Forms (RESPECT / UstadMobile "list of learning units").
+ * Returns a single Publication Listing of every published online-survey form
+ * across all groups the user can access. There is no groups nesting — each form
+ * is listed directly, so the RESPECT launcher shows "forms" like a list of
+ * individually shared links.
+ *
+ * @route GET /opds/forms
+ * @returns {object} OPDS 2.0 Publication Listing JSON
+ */
+app.get('/opds/forms', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
+    const groupsListLib = require('./groups-list.js')
+
+    let groupIds = await groupsListLib()
+    // If a respectToken is present, filter to user's allowed groups
+    if (req.respectUser) {
+      groupIds = groupIds.filter(id => req.respectUser.allowedGroupIds.includes(id))
+    }
+
+    const publications = []
+    for (const groupId of groupIds) {
+      const { groupLabel, publishedFormIds, formsPath } = await getGroupMetadata(groupId)
+      const { listedForms, formsModified } = await getListedPublishedForms(formsPath, publishedFormIds)
+      for (const form of listedForms) {
+        publications.push(await buildFormPublication(baseUrl, groupId, groupLabel, form, formsModified, req.query.respectToken))
+      }
+    }
+
+    publications.sort((a, b) => a.metadata.title.localeCompare(b.metadata.title))
+
+    const opdsCatalog = {
+      metadata: {
+        title: 'Tangerine Forms'
+      },
+      links: [
+        { rel: 'self', href: `${baseUrl}/opds/forms?respectToken=${req.query.respectToken}`, type: 'application/opds+json' }
+      ],
+      publications
+    }
+
+    res.set('Content-Type', 'application/opds+json')
+    res.send(opdsCatalog)
+  } catch (error) {
+    console.error('Error generating OPDS Forms catalog:', error)
+    res.status(500).send({ error: 'Failed to generate OPDS Forms catalog' })
+  }
+})
+
+/**
+ * OPDS 2.0 Publication Detail for a Form (flat path).
+ * Returns full publication metadata, links, images, and resources for a single
+ * form, pointing to the online-survey-app URL.
+ *
+ * @route GET /opds/forms/:groupId/:formId
+ * @returns {object} OPDS 2.0 Publication JSON
+ */
+app.get('/opds/forms/:groupId/:formId', hasRespectToken, async function (req, res) {
+  try {
+    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
+    const groupId = req.params.groupId
+    const formId = req.params.formId
+
+    // If a respectToken is present, verify the user has access to this group
+    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
+      return res.status(403).send({ error: 'Access denied to this group' })
+    }
+
+    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/forms')
+
+    res.set('Content-Type', 'application/opds-publication+json')
+    res.send(publication)
+  } catch (error) {
+    console.error('Error generating OPDS publication for form:', error)
+    res.status(500).send({ error: 'Failed to generate OPDS publication for form' })
+  }
+})
+
+/**
+ * OPDS 2.0 Publication Detail for a Form (legacy groups path, kept for backward
+ * compatibility). Delegates to the same shared helper as the flat route.
  *
  * @route GET /opds/groups/:groupId/:formId
  * @returns {object} OPDS 2.0 Publication JSON
@@ -992,155 +1529,7 @@ app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, r
       return res.status(403).send({ error: 'Access denied to this group' })
     }
 
-    const GROUPS_DB = new DB('groups')
-    const formsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
-
-    // Get group metadata and published online surveys
-    let groupLabel = groupId
-    let publishedFormIds = []
-    try {
-      const groupDoc = await GROUPS_DB.get(groupId)
-      groupLabel = groupDoc.label || groupId
-      const onlineSurveys = groupDoc.onlineSurveys || []
-      publishedFormIds = onlineSurveys.filter(s => s.published).map(s => s.formId)
-    } catch (err) {
-      // Group doc may not exist; continue with groupId as label
-    }
-
-    // Read forms.json to find the form definition
-    let form = null
-    let formTitle = formId
-    try {
-      const forms = await fs.readJson(formsPath)
-      form = forms.find(f => f.id === formId)
-      if (form && form.title) {
-        formTitle = form.title
-      }
-    } catch (err) {
-      // forms.json not found; use formId as title
-    }
-    const formsModified = await getFormsModified(formsPath)
-
-    const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
-
-    // Build images from form definition
-    const images = []
-    if (form && Array.isArray(form.images)) {
-      for (const img of form.images) {
-        const href = img.href.startsWith('http') ? img.href : `${baseUrl}/opds/images/${img.href}`
-        images.push({
-          href,
-          type: img.type || 'image/jpeg',
-          ...(img.height ? { height: img.height } : {}),
-          ...(img.width ? { width: img.width } : {})
-        })
-      }
-    } else if (form && form.cover) {
-      images.push({
-        href: `${baseUrl}/opds/images/${form.cover}`,
-        type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
-      })
-    } else {
-      images.push({
-        href: `${baseUrl}/opds/images/form.png`,
-        type: 'image/png'
-      })
-    }
-
-    // Build resources: list all files required to render the online survey form.
-    // This includes both the Angular app shell files (from the dist) and the
-    // group content files (from the client directory). URLs match what the
-    // browser actually requests when loading the online survey, so an HTTP
-    // proxy can pre-cache them for offline use.
-    const resources = []
-    const releaseBaseUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}`
-    const assetsBaseUrl = `${releaseBaseUrl}/assets`
-    const clientDir = `/tangerine/groups/${groupId}/client`
-    const distDir = '/tangerine/online-survey-app/dist/online-survey-app'
-
-    // Helper: add a resource at the assets/ path.
-    function addAssetResource(relativePath, mimeType) {
-      resources.push({ href: `${assetsBaseUrl}/${relativePath}`, type: mimeType })
-    }
-    // Helper: add a resource at the release root path.
-    function addRootResource(relativePath, mimeType) {
-      resources.push({ href: `${releaseBaseUrl}/${relativePath}`, type: mimeType })
-    }
-
-    // 1. App shell files from the online-survey-app dist (runtime.js, main.js, etc.).
-    try {
-      const distFiles = await listClientFiles(distDir, distDir, [])
-      for (const file of distFiles) {
-        addRootResource(file.relativePath, file.mimeType)
-      }
-    } catch (err) {
-      console.error(`Error listing dist files:`, err)
-    }
-
-    // 2. Group client content files (form HTML, translations, custom scripts, media, etc.).
-    //    The release-online-survey-app.sh script maps:
-    //      client/<formId>/*.html  →  assets/form/<filename>
-    //      everything else         →  assets/<relativePath>
-    try {
-      const clientFiles = await listClientFiles(clientDir, clientDir)
-      for (const file of clientFiles) {
-        // Form HTML files go to assets/form/ (matching release-online-survey-app.sh).
-        if (file.relativePath.startsWith(`${formId}/`)) {
-          const filename = path.basename(file.relativePath)
-          addAssetResource(`form/${filename}`, file.mimeType)
-        } else {
-          addAssetResource(file.relativePath, file.mimeType)
-        }
-      }
-    } catch (err) {
-      console.error(`Error listing client files for group ${groupId}:`, err)
-    }
-
-    // 3. Tangerine-level translations (copied by release-online-survey-app.sh).
-    const tangerineTranslationsDir = '/tangerine/translations'
-    try {
-      const translationFiles = await listClientFiles(tangerineTranslationsDir, tangerineTranslationsDir, [])
-      for (const file of translationFiles) {
-        addAssetResource(file.relativePath, file.mimeType)
-      }
-    } catch (err) {
-      // Translations dir may not exist; skip.
-    }
-
-    // 4. Tangy-form library files (web components for tangy-form, tangy-input, etc.).
-    //    Needed to render form items offline.
-    const tangyFormDir = '/tangerine/tangy-form'
-    try {
-      const dirExists = await fs.pathExists(tangyFormDir)
-      if (dirExists) {
-        const tangyFormFiles = await listClientFiles(tangyFormDir, tangyFormDir, ['node_modules', 'test', 'demo', 'docs', '.github'])
-        console.log(`OPDS: Found ${tangyFormFiles.length} tangy-form files for group ${groupId}`)
-        for (const file of tangyFormFiles) {
-          addAssetResource(`tangy-form/${file.relativePath}`, file.mimeType)
-        }
-      } else {
-        console.warn(`OPDS: tangy-form dir not found at ${tangyFormDir}`)
-      }
-    } catch (err) {
-      console.error('Error listing tangy-form files:', err)
-    }
-
-    const publication = {
-      metadata: {
-        '@type': 'http://schema.org/Game',
-        title: formTitle,
-        author: groupLabel,
-        identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
-        language: 'en',
-        modified: formsModified
-      },
-      links: [
-        { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
-        { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
-      ],
-      images,
-      resources
-    }
+    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/groups')
 
     res.set('Content-Type', 'application/opds-publication+json')
     res.send(publication)

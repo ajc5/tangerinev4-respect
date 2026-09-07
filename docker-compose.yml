@@ -72,7 +72,10 @@ services:
         - ./online-survey-app/dist/online-survey-app:/tangerine/online-survey-app/dist/online-survey-app:ro \
         - ./tangy-form:/tangerine/tangy-form:delegated \
         - ./server/entrypoint-server.sh:/tangerine/server/entrypoint-server.sh:delegated
-        - ./editor/dist/tangerine-editor:/tangerine/editor/dist/tangerine-editor:delegated
+        # Mount the editor/dist parent (not the Angular outputDir itself) so
+        # the in-container `ng build` can delete/recreate dist/tangerine-editor.
+        # Binding the outputDir root directly causes EBUSY: rmdir on macOS.
+        - ./editor/dist:/tangerine/editor/dist:delegated
         - ./data/ssh:/root/.ssh:delegated \
         - ./data/state:/state:delegated \
 
@@ -109,7 +112,9 @@ services:
       - ./server-ui/src:/tangerine/server-ui/src:delegated
       - ./tangy-form-editor:/tangerine/tangy-form-editor:delegated
       - ./tangy-form:/tangerine/tangy-form:delegated
-      - ./editor/dist/tangerine-editor:/tangerine/editor/dist/tangerine-editor:delegated
+      # Mount the editor/dist parent (not the Angular outputDir itself) so the
+      # in-container `ng build` can delete/recreate dist/tangerine-editor.
+      - ./editor/dist:/tangerine/editor/dist:delegated
 
   apk-generator:
     container_name: "apk-generator"

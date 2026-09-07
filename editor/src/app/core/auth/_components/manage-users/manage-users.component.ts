@@ -69,7 +69,7 @@ export class ManageUsersComponent implements OnInit {
   }
 
   getRespectUrl(user) {
-    return `${this.baseUrl}/respect-app-manifest?respectToken=${user.respectToken}`;
+    return `${this.baseUrl}/respect-app-manifest/v2?respectToken=${user.respectToken}`;
   }
 
 }
