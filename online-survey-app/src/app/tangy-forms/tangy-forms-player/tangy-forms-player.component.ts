@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { FormsService } from 'src/app/shared/_services/forms-service.service';
 import { AppConfigService } from 'src/app/shared/_services/app-config.service';
 import { OfflineOutboxService } from 'src/app/shared/_services/offline-outbox.service';
+import { nativeXapiRelay } from 'src/app/shared/_services/xapi-relay';
 import { CaseService } from 'src/app/case/services/case.service';
 import { TangyFormService } from '../tangy-form.service';
 declare const ADL: any;
@@ -374,45 +375,40 @@ private validateEndpoint(value: string | null): string | undefined {
     console.log('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
     console.log('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
 
-    // If the device is offline, don't attempt delivery now - queue the whole
-    // batch (with its LRS endpoint/auth and optional IPC package) so it can be
-    // replayed from the outbox when connectivity returns.
+    // Relay over IPC whenever the hosting app offers it - INCLUDING while offline. The
+    // hop to the launcher is a local Binder call; only the launcher's own POST to the LRS
+    // needs connectivity, and the host persists the batch and retries it (the Tangerine
+    // app does that with a connectivity-constrained WorkManager job). Falling back to
+    // this page's outbox when offline would be strictly worse: that outbox can only be
+    // flushed by a page that is still alive, and it has no route to the launcher at all.
+    const relay = nativeXapiRelay(this.window);
+    if (relay && this.lrsIpcPackage) {
+      const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+      console.log('[xAPI Debug] Relaying', statements.length, 'statements via native IPC to', this.lrsIpcPackage, '(online:', online + ')');
+      try {
+        await relay.forward({
+          endpoint: this.lrsEndpoint,
+          auth: this.lrsAuth,
+          ipcPackage: this.lrsIpcPackage,
+          statementsJson: JSON.stringify(statements)
+        });
+        console.log('[xAPI Debug] Statements handed to the native IPC relay');
+        return;
+      } catch (error) {
+        console.error('[xAPI Debug] Statements relay FAILED:', error);
+        console.log('[xAPI Debug] Falling back to the outbox so the batch is not lost.');
+      }
+    }
+
+    // No launcher to relay to (a plain browser, or a host that has not been handed the
+    // IPC package). Offline, keep the whole batch - with the endpoint/auth it needs - so a
+    // later attempt can complete it.
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       console.log('[xAPI Debug] Offline - queueing', statements.length, 'statements for later delivery.');
       try {
         await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);
       } catch (queueError) {
         console.error('[xAPI Debug] Failed to queue statements:', queueError);
-      }
-      return;
-    }
-
-    // If we are running inside the native Tangerine (Capacitor) app and the
-    // launch carried a launcher IPC package, relay the statements to the
-    // RESPECT launcher via TangyCache.forwardXapiStatements so it can forward
-    // them to the LRS (adding assignment context when launched from an
-    // assignment). Direct LRS POSTing via ADL only works inside the launcher's
-    // own WebView / a plain browser, where no native IPC relay exists.
-    const cap = this.window ? this.window.Capacitor : null;
-    const tangyCache = cap && cap.Plugins && cap.Plugins.TangyCache;
-    if (tangyCache && this.lrsEndpoint && this.lrsAuth && this.lrsIpcPackage) {
-      console.log('[xAPI Debug] Relaying', statements.length, 'statements via TangyCache to ipcPackage:', this.lrsIpcPackage);
-      try {
-        await tangyCache.forwardXapiStatements({
-          endpoint: this.lrsEndpoint,
-          auth: this.lrsAuth,
-          ipcPackage: this.lrsIpcPackage,
-          statementsJson: JSON.stringify(statements)
-        });
-        console.log('[xAPI Debug] Statements relayed to native app for LRS delivery');
-      } catch (error) {
-        console.error('[xAPI Debug] Statements relay FAILED:', error);
-        console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
-        try {
-          await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);
-        } catch (queueError) {
-          console.error('[xAPI Debug] Failed to queue statements:', queueError);
-        }
       }
       return;
     }

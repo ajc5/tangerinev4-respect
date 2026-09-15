@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { nativeXapiRelay } from './xapi-relay';
 
 /**
  * OfflineOutboxService
@@ -16,11 +17,12 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
  *     replay it exactly like `FormsService.uploadFormResponse` does.
  *
  *  2. `xapi-statements` – a batch of xAPI statements destined for the school
- *     LRS (RESPECT flow). We store the statements + the LRS `endpoint` + the
- *     `auth` string (verbatim, the same value the RESPECT launcher put in the
- *     launch URL and that ADL.XAPIWrapper already sends as the Authorization
- *     header) and, when available, the launcher IPC package so a native
- *     (Capacitor) host can relay it via TangyCache.forwardXapiStatements.
+ *     LRS (RESPECT flow). These are handed to the hosting app's IPC relay when it
+ *     offers one (`nativeXapiRelay`): the launcher owns the LRS credentials and adds
+ *     assignment context, and the host persists the batch and retries it, so delivery
+ *     survives this app being killed. Only when there is no such host are they stored
+ *     here, together with the LRS `endpoint` and `auth` so a direct POST can complete
+ *     them later.
  *
  * The queue lives in `localStorage` under a single key so it survives WebView
  * reloads / app restarts (same origin). `flush()` is called on app start and
@@ -117,6 +119,30 @@ export class OfflineOutboxService {
    * Queue a batch of xAPI statements that could not reach the LRS.
    */
   async queueXapiStatements(statements: any[], endpoint: string, auth: string, ipcPackage?: string): Promise<number> {
+    // A hosting app that offers an IPC relay should own this batch rather than this
+    // outbox: it persists the batch and retries it on its own schedule, so delivery
+    // survives this app being killed, whereas an entry here is only ever flushed by a
+    // page that is still alive - and it has no route to the launcher at all.
+    if (endpoint && auth && ipcPackage) {
+      const relay = nativeXapiRelay(typeof window === 'undefined' ? null : window);
+      if (relay) {
+        try {
+          const accepted = await relay.queue({
+            endpoint,
+            auth,
+            ipcPackage,
+            statementsJson: JSON.stringify(statements)
+          });
+          if (accepted) {
+            console.log('[Outbox] Handed', statements.length, 'xAPI statement(s) to the native IPC relay.');
+            return this.pendingCount();
+          }
+        } catch (error) {
+          console.warn('[Outbox] Native xAPI relay refused the batch; queueing it here instead:', error && error.message || error);
+        }
+      }
+    }
+
     const items = this.read();
     items.push({
       type: 'xapi-statements',
@@ -198,19 +224,22 @@ export class OfflineOutboxService {
   }
 
   private async doFlush(): Promise<number> {
-    // If the browser knows we have no connectivity, don't even try (the
-    // requests would just hang/fail); we'll be woken again by the online event.
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      const count = this.pendingCount();
-      if (count > 0) {
-        console.log('[Outbox] Still offline;', count, 'item(s) remain queued.');
-      }
-      return count;
-    }
+    // A device with no connectivity cannot upload a form response, but it CAN still hand
+    // an xAPI batch to the launcher over IPC (a local Binder call). Only skip the whole
+    // flush when there is no relay either - otherwise we would wait for an 'online' event
+    // to do something that never needed the network.
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
     const items = this.read();
     if (items.length === 0) {
       return 0;
+    }
+
+    if (offline && !nativeXapiRelay(typeof window === 'undefined' ? null : window)) {
+      // If the browser knows we have no connectivity, don't even try (the
+      // requests would just hang/fail); we'll be woken again by the online event.
+      console.log('[Outbox] Still offline;', items.length, 'item(s) remain queued.');
+      return items.length;
     }
 
     console.log('[Outbox] Flushing', items.length, 'queued item(s)...');
@@ -218,6 +247,11 @@ export class OfflineOutboxService {
     for (const item of items) {
       try {
         if (item.type === 'form-response') {
+          if (offline) {
+            // Uploading a response needs the network; keep it for the next attempt.
+            remaining.push(item);
+            continue;
+          }
           await this.sendQueuedFormResponse(item);
         } else {
           await this.sendQueuedXapiStatements(item);
@@ -258,19 +292,27 @@ export class OfflineOutboxService {
   }
 
   private async sendQueuedXapiStatements(item: QueuedXapiStatements): Promise<void> {
-    // Prefer the native (Capacitor) IPC relay when the queued statements were
-    // originally meant for it and the host is still the Tangerine app.
-    const cap = (window as any).Capacitor;
-    const tangyCache = cap && cap.Plugins && cap.Plugins.TangyCache;
-    if (tangyCache && item.ipcPackage && item.endpoint && item.auth) {
-      await tangyCache.forwardXapiStatements({
-        endpoint: item.endpoint,
-        auth: item.auth,
-        ipcPackage: item.ipcPackage,
-        statementsJson: JSON.stringify(item.statements)
-      });
-      return;
+    // Prefer the hosting app's IPC relay: these statements were launched for the
+    // launcher, which owns the LRS credentials and adds assignment context when the
+    // lesson came from an assignment. It is a local call, so it also works offline.
+    // `queue` (not `forward`) because this is a background flush: it must not drag the
+    // user back to the launcher the way a just-submitted form does.
+    if (item.ipcPackage && item.endpoint && item.auth) {
+      const relay = nativeXapiRelay(typeof window === 'undefined' ? null : window);
+      if (relay) {
+        const accepted = await relay.queue({
+          endpoint: item.endpoint,
+          auth: item.auth,
+          ipcPackage: item.ipcPackage,
+          statementsJson: JSON.stringify(item.statements)
+        });
+        if (!accepted) {
+          throw new Error('the native IPC relay did not accept the xAPI batch');
+        }
+        return;
+      }
     }
+
     // Otherwise POST straight to the LRS /statements endpoint. `auth` is kept
     // verbatim (it is the same value ADL.XAPIWrapper sends as the
     // Authorization header when launched by the RESPECT launcher).
