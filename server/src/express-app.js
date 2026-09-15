@@ -144,29 +144,55 @@ app.use(compression({
     return compression.filter(req, res)
   }
 }))
+// Cache lifetimes for RESPECT/OPDS responses, in seconds. These are the knobs
+// trading propagation latency against revalidation traffic and offline
+// tolerance:
+//   * catalogs are small and are the discovery path, so revalidate often;
+//   * form descriptors and release assets are large and must also be playable
+//     offline, so allow a short usable window and revalidate beyond it.
+const CATALOG_MAX_AGE = 10
+const FORM_CONTENT_MAX_AGE = 300
+
 // Manifest responses are explicitly cacheable so proxies/operators store them.
 // Validation still happens via the ETag Express generates for res.send, and via
 // Last-Modified/ETag for static files; none of these responses set a Vary header.
+//
+// Deliberately no `must-revalidate` (RFC 9111 5.2.2.2). A response carrying it
+// MUST NOT be reused once stale even when the client is willing to accept stale,
+// because it overrides the client's `max-stale` request directive. That is
+// exactly the behaviour an offline-first launcher needs, and leaving it off is
+// what lets a short max-age deliver BOTH a usable copy while disconnected and a
+// cheap 304 revalidation when the network is reachable. With `must-revalidate` a
+// stale entry was unusable offline and could not be refreshed without clearing
+// the app's storage and cache.
 app.use(['/opds', '/respect-app-manifest'], function (req, res, next) {
-  res.setHeader('Cache-Control', 'public, max-age=300')
+  res.setHeader('Cache-Control', `public, max-age=${CATALOG_MAX_AGE}`)
   next()
 })
 
-// Per-form OPDS resources (publication detail + tincan.xml) are treated as
-// immutable so the RESPECT launcher's HTTP cache (OkHttp/UstadCache) serves them
-// from cache OFFLINE without attempting revalidation. Revalidation needs the
-// network, and when the form was downloaded more than max-age ago (previously
-// 300s) the launcher fails offline with "exception validating" -> network error.
-// Feed/catalog LIST URLs (/opds/groups, /opds/forms, /opds/groups/:groupId and
-// /respect-app-manifest*) are intentionally NOT included here so newly published
-// forms still appear when the device is online. This mirrors the /releases assets
-// (Cache-Control: public, max-age=31536000, immutable) which already play offline.
+// Per-form OPDS resources (publication detail + tincan.xml).
+//
+// These were previously served `max-age=31536000, immutable` to stop the
+// launcher revalidating them while offline ("exception validating" -> network
+// error). That did make them play offline, but it also made them permanently
+// unrefreshable: a client holding an immutable copy never asks again, so a
+// re-released form - or a changed declared activity id in tincan.xml - never
+// reaches a device that already downloaded the form. The only workaround was to
+// clear the app's storage and cache.
+//
+// A short max-age plus the ETag Express generates for res.send gets both
+// properties: the stored copy stays usable for a short offline window, and once
+// that window passes a client that is reachable revalidates and picks up the new
+// body (304 when unchanged). Note the descriptor is only re-read while the
+// network happens to be available; a device offline for longer than the window
+// relies on its cache accepting the stale entry, which is why `must-revalidate`
+// must stay off here too.
 app.use([
   '/opds/groups/:groupId/:formId',
   '/opds/forms/:groupId/:formId',
   '/opds/tincan.xml/:groupId/:formId'
 ], function (req, res, next) {
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  res.setHeader('Cache-Control', `public, max-age=${FORM_CONTENT_MAX_AGE}`)
   next()
 })
 
@@ -332,7 +358,17 @@ app.get('/usage/:startdate/:enddate', require('./routes/usage'));
 
 // Static assets.
 app.use('/client', express.static('/tangerine/client/dev'));
-app.use('/opds/images/', express.static('/tangerine/client-content-assets', { maxAge: '1y', immutable: true }));
+// Cover images referenced from the publications' images[]. These sit under /opds
+// so they must not be `immutable` for the same reason as the release assets: a
+// changed cover would never reach a client that had already cached it. Set the
+// header explicitly rather than via express.static's options, so the value does
+// not depend on whether the blanket /opds middleware above won the header race.
+// express.static still supplies ETag/Last-Modified, so revalidation is a 304.
+app.use('/opds/images/', function (req, res, next) {
+  res.setHeader('Cache-Control', `public, max-age=${FORM_CONTENT_MAX_AGE}`)
+  next()
+})
+app.use('/opds/images/', express.static('/tangerine/client-content-assets'));
 // app.use('/', express.static('/tangerine/editor/dist/tangerine-editor'));
 
 
@@ -422,16 +458,22 @@ app.use('/editor/:groupId/location-list/delete', require('./routes/group-locatio
 
 app.use('/csv/', isAuthenticated, express.static('/csv/'));
 
-// Set caching headers for all release assets so HTTP caches (including
-// Android WebView caching libraries) can store them for offline use.
+// Release assets. These must stay cacheable - the launcher's cache and the
+// Android WebView cache play forms from here offline - but they must NOT be
+// `immutable`: a re-release rewrites the same paths in place
+// (release-online-survey-app.sh rm -r's and recreates the release directory), so
+// an immutable copy can never be updated. A short max-age lets a reachable
+// client revalidate; express.static supplies Last-Modified and ETag, so an
+// unchanged file costs a 304, while a changed file is re-fetched. Raising
+// FORM_CONTENT_MAX_AGE trades slower propagation for less revalidation traffic
+// across the (large) resource list in each manifest.
 app.use('/releases/', function (req, res, next) {
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  res.setHeader('Cache-Control', `public, max-age=${FORM_CONTENT_MAX_AGE}`)
   res.setHeader('Access-Control-Allow-Origin', '*')
   next()
 })
 app.use('/releases/', express.static('/tangerine/client/releases', {
-  maxAge: '1y',
-  immutable: true
+  maxAge: '5m'
 }))
 
 // Fallback: serve tangy-form library files from /tangerine/tangy-form/ when the
@@ -439,7 +481,7 @@ app.use('/releases/', express.static('/tangerine/client/releases', {
 // This must come BEFORE the general assets fallback below.
 app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets/tangy-form', function (req, res, next) {
   const tangyFormPath = '/tangerine/tangy-form'
-  return express.static(tangyFormPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+  return express.static(tangyFormPath, { maxAge: '5m' }).apply(this, arguments)
 })
 
 // Fallback: serve form HTML files from the group's client/<formId>/ directory
@@ -448,7 +490,7 @@ app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets/form'
   const groupId = req.params.groupId
   const formId = req.params.formId
   const formPath = `/tangerine/groups/${groupId}/client/${formId}`
-  return express.static(formPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+  return express.static(formPath, { maxAge: '5m' }).apply(this, arguments)
 })
 
 // Fallback: serve online-survey-app assets from the group's client directory
@@ -457,14 +499,14 @@ app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets/form'
 app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId/assets', function (req, res, next) {
   const groupId = req.params.groupId
   const contentPath = `/tangerine/groups/${groupId}/client`
-  return express.static(contentPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+  return express.static(contentPath, { maxAge: '5m' }).apply(this, arguments)
 })
 
 // Fallback: serve online-survey-app shell files (runtime.js, main.js, etc.)
 // from the dist directory when the release hasn't been built yet.
 app.use('/releases/:releaseType/online-survey-apps/:groupId/:formId', function (req, res, next) {
   const distPath = '/tangerine/online-survey-app/dist/online-survey-app'
-  return express.static(distPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+  return express.static(distPath, { maxAge: '5m' }).apply(this, arguments)
 })
 
 app.use('/client/', express.static('/tangerine/client/builds/dev'))
@@ -893,7 +935,7 @@ app.get('/respect-app-manifest/:groupId/:formId', hasRespectToken, async functio
  * launcher reads the activity id and <launch> URL from this file, then appends
  * xAPI launch params (endpoint/auth/actor/activity_id) to the launch URL so the
  * online-survey-app can send statements back to the LRS.
- *
+ * 
  * @route GET /opds/tincan.xml/:groupId/:formId
  * @returns {application/xml} tincan.xml
  */
@@ -921,7 +963,7 @@ app.get('/opds/tincan.xml/:groupId/:formId', hasRespectToken, async function (re
       // forms.json not found; use formId as title
     }
 
-    const activityId = `${baseUrl}/opds/forms/${groupId}/${formId}`
+    const activityId = `${baseUrl}/xapi/activities/${groupId}/${formId}`
     const launchUrl = formOnlineSurveyUrl(baseUrl, groupId, formId)
     const tincanXml = `<?xml version="1.0" encoding="UTF-8"?>
 <tincan xmlns="http://projecttincan.com/tincan.xsd">
@@ -955,9 +997,11 @@ app.use('/opds/content/:groupId', hasRespectToken, function (req, res, next) {
     return res.status(403).send({ error: 'Access denied to this group' })
   }
   const contentPath = `/tangerine/groups/${groupId}/client`
-  // Immutable cache so a launcher/proxy that pre-caches OPDS resources (the
-  // online survey + form content) can serve them offline without revalidation.
-  return express.static(contentPath, { maxAge: '1y', immutable: true }).apply(this, arguments)
+  // Revalidatable, not immutable: these are the same form content files the
+  // release bundle serves, and a re-published form must be able to reach a
+  // client that already cached them. max-age keeps them usable offline for a
+  // short window; express.static supplies ETag/Last-Modified for the 304.
+  return express.static(contentPath, { maxAge: '5m' }).apply(this, arguments)
 })
 
 // MIME type lookup for common file extensions used in form content.
@@ -1023,6 +1067,10 @@ async function listClientFiles(dirPath, baseDir, ignorePatterns = ['node_modules
 // mtime of the group's forms.json so the response body — and therefore the ETag
 // used for If-None-Match cache validation — stays stable between requests
 // instead of changing every second (which would defeat HTTP caching).
+//
+// This is group-level and only used by the LISTING feeds, which advertise the
+// detail URL and nothing else, so forms.json is an adequate sentinel there. The
+// per-form descriptor uses getFormModified() below instead.
 async function getFormsModified(formsPath) {
   try {
     const stat = await fs.stat(formsPath)
@@ -1031,6 +1079,96 @@ async function getFormsModified(formsPath) {
     // forms.json may not exist yet; use a stable epoch value.
     return new Date(0).toISOString()
   }
+}
+
+// Newest mtime (ms) across a set of files/directories. Directories are walked
+// recursively (skipping heavy/irrelevant trees), and the result is memoised
+// briefly so a burst of OPDS requests does not re-walk the tree every time.
+const MODIFIED_MTIME_TTL_MS = 5000
+const modifiedMtimeCache = new Map()
+const MODIFIED_WALK_SKIP = ['node_modules', '.git']
+
+async function newestMtimeMs(paths) {
+  let newest = 0
+  async function walk(dirPath) {
+    let entries
+    try {
+      entries = await fs.readdir(dirPath, { withFileTypes: true })
+    } catch (err) {
+      return
+    }
+    for (const entry of entries) {
+      if (MODIFIED_WALK_SKIP.includes(entry.name)) continue
+      const fullPath = path.join(dirPath, entry.name)
+      if (entry.isDirectory()) {
+        await walk(fullPath)
+      } else if (entry.isFile()) {
+        try {
+          const stat = await fs.stat(fullPath)
+          if (stat.mtimeMs > newest) newest = stat.mtimeMs
+        } catch (err) {
+          // File vanished mid-walk; ignore.
+        }
+      }
+    }
+  }
+  for (const p of paths) {
+    let stat
+    try {
+      stat = await fs.stat(p)
+    } catch (err) {
+      continue
+    }
+    if (stat.isDirectory()) {
+      await walk(p)
+    } else if (stat.mtimeMs > newest) {
+      newest = stat.mtimeMs
+    }
+  }
+  return newest
+}
+
+async function cachedNewestMtimeMs(paths) {
+  const key = paths.join('|')
+  const now = Date.now()
+  const cached = modifiedMtimeCache.get(key)
+  if (cached && (now - cached.at) < MODIFIED_MTIME_TTL_MS) return cached.value
+  const value = await newestMtimeMs(paths)
+  modifiedMtimeCache.set(key, { at: now, value })
+  return value
+}
+
+/**
+ * Content-derived "modified" for a single form.
+ *
+ * The publication body feeds the ETag Express generates for res.send, so this
+ * value MUST change whenever anything the client has to download changes.
+ * Deriving it from the group's forms.json alone was not sufficient: re-releasing
+ * a form (new form HTML, new translations, a fixed tangy-form library) leaves
+ * forms.json untouched, so the body - and therefore the ETag - stayed
+ * byte-identical and a client that already had the form kept its stale copy
+ * forever via 304.
+ *
+ * Covers everything the release serves: the form source, the built release
+ * bundle, and the shared trees the release copies from or is served out of.
+ * The shared trees are cached separately so they are walked once per TTL
+ * regardless of how many forms are being requested.
+ */
+async function getFormModified(groupId, formId, formsPath) {
+  const [shared, formSpecific] = await Promise.all([
+    cachedNewestMtimeMs([
+      '/tangerine/tangy-form',
+      '/tangerine/online-survey-app/dist/online-survey-app'
+    ]),
+    cachedNewestMtimeMs([
+      formsPath,
+      `/tangerine/groups/${groupId}/client/${formId}`,
+      `/tangerine/client/releases/prod/online-survey-apps/${groupId}/${formId}`
+    ])
+  ])
+  const newest = Math.max(shared, formSpecific)
+  // Nothing found: keep the stable epoch value so the response stays cacheable.
+  return new Date(newest).toISOString()
 }
 
 /**
@@ -1323,7 +1461,11 @@ async function buildFormPublicationDetail(baseUrl, groupId, formId, respectToken
   } catch (err) {
     // forms.json not found; use formId as title
   }
-  const formsModified = await getFormsModified(formsPath)
+  // Content-derived, NOT forms.json mtime alone: a re-release changes what the
+  // client must download without touching forms.json, and if the publication
+  // body does not change then its ETag does not change either and the client
+  // keeps the old copy indefinitely via 304.
+  const formsModified = await getFormModified(groupId, formId, formsPath)
 
   const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
 

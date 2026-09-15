@@ -125,12 +125,17 @@ export function setXapiResultCommon(result) {
 export function generateXapiStatementFromTemplate(input, xapiProperties = {}) {
   if (!input) return null;
   const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = input.label || input.name;
+  // Fall back to '' so an absent label/name does not publish the string "undefined".
+  tempDiv.innerHTML = input.label || input.name || '';
   let inputLabel =  tempDiv.textContent || tempDiv.innerText || '';
 
   let locale = document.documentElement.lang || navigator.language;
   let { formId, groupId } = extractIdsFromUrl();
   let formTitle = input.closest('tangy-form') ? input.closest('tangy-form').getAttribute('title') : '';
+  // A <tangy-form> element is the form itself, not a question: its activity id is
+  // {origin}/xapi/activities/group-<groupId>/form-<formId> with no question segment,
+  // matching the <activity id> in the server's tincan.xml.
+  const isFormElement = input.tagName === 'TANGY-FORM'
   let inputId = {
     id: input.name || input.id,
     itemId: input.closest('tangy-form-item') ? input.closest('tangy-form-item').id : '',
@@ -143,7 +148,7 @@ export function generateXapiStatementFromTemplate(input, xapiProperties = {}) {
       "display": { [locale]: "answered" }
     },
     "object": {
-      "id": getIDUrl(inputId),
+      "id": getIDUrl(isFormElement ? { formId, groupId } : inputId),
       "objectType": "Activity",
       "definition": {
         "name": { [locale]: inputId.id },
@@ -312,17 +317,17 @@ function extractIdsFromUrl() {
 
   // check pathname (e.g. /.../group-<uuid>/form-<uuid>/...)
   const path = url.pathname;
-  const pathGroup = path.match(new RegExp(`group-(${uuidPattern})`));
-  const pathForm = path.match(new RegExp(`form-(${uuidPattern})`));
-  if (pathGroup) groupId = (pathGroup[1] || groupId);
-  if (pathForm) formId = (pathForm[1] || formId);
+  const pathGroup = path.match(new RegExp(`group-${uuidPattern}`));
+  const pathForm = path.match(new RegExp(`form-${uuidPattern}`));
+  if (pathGroup) groupId = (pathGroup[0] || groupId);
+  if (pathForm) formId = (pathForm[0] || formId);
 
   // check hash/fragment (e.g. #/form/form-<uuid-...>)
   const hash = url.hash || '';
-  const hashGroup = hash.match(new RegExp(`group-(${uuidPattern})`));
-  const hashForm = hash.match(new RegExp(`form-(${uuidPattern})`));
-  if (hashGroup) groupId = (hashGroup[1] || groupId);
-  if (hashForm) formId = (hashForm[1] || formId);
+  const hashGroup = hash.match(new RegExp(`group-${uuidPattern}`));
+  const hashForm = hash.match(new RegExp(`form-${uuidPattern}`));
+  if (hashGroup) groupId = (hashGroup[0] || groupId);
+  if (hashForm) formId = (hashForm[0] || formId);
 
   return { groupId, formId };
 }
@@ -340,7 +345,7 @@ function deepMerge(target, source) {
 }
 
 function getIDUrl(inputId) {
-  let baseUrl = `${window.location.origin}${window.location.pathname.replace(/\/$/, '')}`;
+  let baseUrl = `${window.location.origin}/xapi/activities`;
   let groupUrl = `${baseUrl}/${encodeURIComponent(inputId.groupId)}`;
   let formUrl = `${groupUrl}/${encodeURIComponent(inputId.formId)}`;
     if (inputId.id) {
