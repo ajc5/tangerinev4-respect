@@ -2,6 +2,25 @@
 <span *ngxPermissionsOnly="['can_create_users']">
   <paper-fab  mat-raised-button icon="add" class="action" color="accent" routerLink="/manage-users/new-user"></paper-fab>
 </span>
+<!-- user1 is not stored in the users DB and the profile route is closed to it
+     (`non_user1_user`), so it has no other page on which to reach its RESPECT
+     link. Shown to user1 only; every other user has a profile page.
+     Deliberately not a mat-form-field: Material 15 defaults every field to the
+     'fill' appearance, which adds inner padding, darkens the background on
+     hover/focus and highlights in the primary blue. Tangerine's text fields are
+     underline-only with an orange highlight, so this follows that instead (see
+     the styles in this component's stylesheet). -->
+<ng-container *ngxPermissionsExcept="['non_user1_user']">
+  <div *ngIf="respectUrl" class="respect-link-block">
+    <label class="respect-link-label" for="respect-link-input">{{'RESPECT Link'|translate}} ({{username}})</label>
+    <div class="respect-link-row">
+      <input id="respect-link-input" class="respect-link-input" readonly [value]="respectUrl" />
+      <button mat-icon-button (click)="copyRespectUrl()" title="{{'Copy RESPECT link'|translate}}">
+        <i class="material-icons mat-24 tangy-location-list-icon">content_copy</i>
+      </button>
+    </div>
+  </div>
+</ng-container>
 <h2>{{'Active Users'|translate}}</h2>
 <mat-table [dataSource]="activeUsers" class="mat-elevation-z8">
   <ng-container matColumnDef="username">

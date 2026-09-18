@@ -87,6 +87,6 @@ export class UpdatePersonalProfileComponent implements OnInit {
     }
   }
   getRespectUrl() {
-    return `${this.baseUrl}/respect-app-manifest/v2?respectToken=${this.user.respectToken}`;
+    return `${this.baseUrl}/respect-app-manifest?respectToken=${this.user.respectToken}`;
   }
 }

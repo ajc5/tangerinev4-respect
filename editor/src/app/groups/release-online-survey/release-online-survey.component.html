@@ -14,17 +14,6 @@
     </p>
 
     <p>
-      To add an individual form to the <strong>RESPECT</strong> launcher (like sharing a link to a Google Doc), click the <i class="material-icons tangy-location-list-icon">share</i> button to copy the form's RESPECT manifest link, then paste it into the launcher's "Add app" dialog.
-    </p>
-
-    <p>
-      To add the whole Tangerine forms feed (all published online surveys) to the launcher, copy the RESPECT app link:
-      <button mat-raised-button color="primary" style="margin-left:8px;" (click)="copyRespectAppLink()">
-        <i class="material-icons tangy-location-list-icon">share</i> {{ 'Copy RESPECT app link' | translate }}
-      </button>
-    </p>
-
-    <p>
       In the <strong>Unpublish Surveys</strong> section, click the <i class="material-icons tangy-location-list-icon">publish</i>
       button to "Publish" an online survey. It will then be listed in the Published Surveys section.
       To 'Publish' a survey and require a Device User to provide an Access Code, click the <i class="material-icons tangy-location-list-icon">lock</i> button.
@@ -35,11 +24,6 @@
 </div>
 
 <h2 class="tangy-foreground-secondary">{{'Published Surveys'|translate}}</h2>
-<div style="margin-bottom:8px;">
-  <button mat-raised-button color="primary" (click)="copyRespectAppLink()">
-    <i class="material-icons tangy-location-list-icon">share</i> {{ 'Copy RESPECT app link (all published surveys)' | translate }}
-  </button>
-</div>
 <table mat-table [dataSource]="publishedSurveys" class="mat-elevation-z8">
 
   <!-- Index Column -->
@@ -70,18 +54,6 @@
     <td mat-cell *matCellDef="let form">{{ form.updatedOn | date: 'medium' }}</td>
   </ng-container>
 
-  <!-- RESPECT Link Column -->
-  <ng-container matColumnDef="respect">
-    <th mat-header-cell *matHeaderCellDef>{{ 'RESPECT' | translate }}</th>
-    <td mat-cell *matCellDef="let form">
-      <button mat-icon-button
-              [title]="'Copy RESPECT link for this form' | translate"
-              (click)="copyRespectLink(form)">
-        <i class="material-icons tangy-location-list-icon">share</i>
-      </button>
-    </td>
-  </ng-container>
-
   <!-- Actions Column -->
   <ng-container matColumnDef="actions">
     <th mat-header-cell *matHeaderCellDef>{{ 'Actions' | translate }}</th>
@@ -100,8 +72,8 @@
   </ng-container>
 
   <!-- Table Header and Rows -->
-  <tr mat-header-row *matHeaderRowDef="['index', 'title', 'locked', 'updatedOn', 'respect', 'actions']"></tr>
-  <tr mat-row *matRowDef="let row; columns: ['index', 'title', 'locked', 'updatedOn', 'respect', 'actions']"></tr>
+  <tr mat-header-row *matHeaderRowDef="['index', 'title', 'locked', 'updatedOn', 'actions']"></tr>
+  <tr mat-row *matRowDef="let row; columns: ['index', 'title', 'locked', 'updatedOn', 'actions']"></tr>
 </table>
 
 <h2 class="tangy-foreground-secondary">{{'Unpublished Surveys'|translate}}</h2>

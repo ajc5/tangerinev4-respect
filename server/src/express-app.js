@@ -58,6 +58,15 @@ const hasRespectToken = require('./middleware/has-respect-token.js')
 // const isAuthenticatedOrHasUploadToken = require('./middleware/is-authenticated-or-has-upload-token.js')
 const isUnprotected = require("./middleware/is-unprotected");
 const tangerineMySQLApi = require('./mysql-api/index.js');
+// Deployment-wide server URL. T_PROTOCOL and T_HOST_NAME are fixed at process
+// start, so resolve the string once here instead of re-deriving it in every
+// route handler below (a handler that omitted the declaration threw a
+// ReferenceError, which surfaced as a 500). The URL helpers and publication
+// builders further down read this directly rather than taking it as a
+// parameter: every call site passed this same value, so the parameter only
+// advertised variability that did not exist.
+const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`;
+const activityIdBase = `${baseUrl}/xapi/activities`;
 
 if (process.env.T_AUTO_COMMIT === 'true') {
   setInterval(commitFilesToVersionControl,parseInt(process.env.T_AUTO_COMMIT_FREQUENCY))
@@ -189,7 +198,6 @@ app.use(['/opds', '/respect-app-manifest'], function (req, res, next) {
 // must stay off here too.
 app.use([
   '/opds/groups/:groupId/:formId',
-  '/opds/forms/:groupId/:formId',
   '/opds/tincan.xml/:groupId/:formId'
 ], function (req, res, next) {
   res.setHeader('Cache-Control', `public, max-age=${FORM_CONTENT_MAX_AGE}`)
@@ -256,7 +264,7 @@ app.get('/users/respectUrl', isAuthenticated, async function (req, res) {
       respectToken = getOrCreateRespectToken(username)
     }
     const respectUrl = respectToken
-      ? `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}/respect-app-manifest/v2?respectToken=${respectToken}`
+      ? `${baseUrl}/respect-app-manifest?respectToken=${respectToken}`
       : null
     res.status(200).send({ data: { respectToken, respectUrl } })
   } catch (error) {
@@ -748,51 +756,78 @@ async function keepAlivePaidWorker() {
 keepAlivePaidWorker()
 
 
-/**
- * RESPECT App Manifest endpoint.
- * Returns an app manifest describing this Tangerine instance in the format used by 
- * UstadMobile/RESPECT Consumer App Integration Guide.
- * 
- * The manifest provides app metadata (name, description, icon) and links to the
- * OPDS catalog of learning units (forms).
- *
- * @route GET /respect-app-manifest
- * @returns {object} RespectAppManifest JSON
- */
-/**
- * Build a RESPECT launchable-app manifest (same shape as the original
- * /respect-app-manifest response). Shared by the Tangerine app manifest, the
- * parallel RESPECT app manifest (/v2), and per-form manifests.
- */
-function buildRespectAppManifest(name, description, learningUnits, defaultLaunchUri) {
-  return {
-    "name": {
-        "en-US": name
-    },
-    "description": {
-        "en-US": description
-    },
-    "license": "AGPL-3.0-or-later",
-    "icon": "https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w",
-    "website": "https://www.tangerinecentral.org",
-    "learningUnits": learningUnits,
-    "defaultLaunchUri": defaultLaunchUri,
+// --- RESPECT spec helpers (UstadMobile/Respect README_ADD_YOUR_APP.md) ---
 
-    "android": {
-        "packageId": "org.tangerinecentral.tangerine",
-        "stores": ["https://play.google.com/store/apps/details?id=org.tangerinecentral.tangerine"],
-        "sourceCode": "https://github.com/Tangerine-Community/Tangerine"
-    }
-  }
-}
+// Single language declaration, used by the OPDS metadata below and by the
+// tincan.xml lang attributes. Deliberately a constant for now: Tangerine content
+// can be translated into many languages and neither forms.json nor config.env
+// carries a language, so a real per-deployment setting needs more design than a
+// config key. One constant so there is one place to change when that lands.
+const RESPECT_LANGUAGE = 'en'
 
-// --- Current RESPECT spec helpers (UstadMobile/Respect README_LAUNCHABLE_APP.md) ---
-
-const TANGERINE_APP_ICON = 'https://images.squarespace-cdn.com/content/v1/6514416d40a14750441d84ed/1695826315639-WCXQA69ASCFCPS9L91UC/tangerine_icon.png?format=300w'
+// Served from our own /opds/images/ mount instead of a third-party CDN: that path
+// is public, cacheable and revalidatable (see the /opds/images/ handler above),
+// and the RESPECT validator requires every link a manifest publishes to carry
+// Last-Modified or ETag. The squarespace URL this replaced sent neither.
+const TANGERINE_APP_ICON = `${baseUrl}/opds/images/tangerine_icon.png`
 const REL_TINCAN_XML = 'https://id.openeel.org/rel/tincanxml'
 const REL_LAUNCHABLE_APP = 'https://id.openeel.org/rel/launchable-app'
 const REL_APP_LAUNCH_URI = 'https://id.openeel.org/rel/app-launch-uri'
+const REL_APPSTORE_ANDROID = 'https://id.openeel.org/rel/appstore-android'
 const SCHEMA_LAUNCHABLE_APP = 'https://id.openeel.org/schema/launchable-app'
+// OPDS 2.0 section 5.1 requires every publication to carry at least one
+// acquisition link (rel starting http://opds-spec.org/acquisition, type one of
+// text/html, application/xml, application/html+xml), so this link is not
+// optional: dropping it makes RESPECT's validator report "No suitable
+// acquisition links" for every form. open-access is accurate here because the
+// release assets it points at are served publicly, with no authentication.
+//
+// KNOWN, ACCEPTED DEVIATION. RESPECT's validator additionally treats the
+// acquisition target as a "Learning Resource ID URL" and reports two errors per
+// form that this deployment cannot currently satisfy:
+//   1. "Learning Resource ID URL (...) contains a #". The unit is a hash-routed
+//      Angular SPA (RouterModule.forRoot(routes, { useHash: true }) in
+//      online-survey-app/src/app/app-routing.module.ts) with no default route,
+//      so the '#/form/<formId>' fragment is what selects the form. A
+//      fragment-free URL only works if the app gains a bootstrap redirect that
+//      derives groupId/formId from the release path and navigates to that route.
+//   2. "Manifest not discovered for learning resource ID URL". The resource, or
+//      a Link header on it, must advertise its manifest (Readium discovery) as
+//      type application/webpub+json. Every OPDS publication here is gated by
+//      hasRespectToken and a per-user token cannot be embedded in shared,
+//      cacheable HTML, so this needs a decision to serve published surveys'
+//      manifests without a token first.
+// Both are recorded in the repo's respect-validator notes; do not "fix" either
+// by removing this link (that trades them for a spec violation) or by pointing
+// it at a URL that does not resolve server-side.
+const REL_ACQUISITION_OPEN_ACCESS = 'http://opds-spec.org/acquisition/open-access'
+
+// The launchable-app manifest links an app store when the app has a native
+// version, its terms of service, and its license - see README_ADD_YOUR_APP.md.
+// The terms link points at Tangerine's published data security statement, which
+// is the closest published equivalent to a terms/privacy page it has.
+const TANGERINE_ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=org.tangerinecentral.tangerine'
+const TANGERINE_TERMS_URL = 'https://docs.tangerinecentral.org/data-security/'
+// LICENSE.txt in this repo is GNU GPL v3 (GitHub reports spdx_id GPL-3.0).
+//
+// The launcher reads no SPDX id off this link. GetLicenseLabelUseCaseAndroid
+// compares the href, as an exact string, against its bundled license table
+// (lib-appui-compose/src/androidMain/res/raw/license_label_json) and labels the
+// app "Proprietary" when nothing matches. No HTTP request is involved, so a URL
+// which merely redirects to a table entry still matches nothing.
+//
+// The GPL-3.0 entry (id "gpl-3-0") carries exactly two hrefs, either of which
+// works:
+//   _links.html.href     https://opensource.org/license/gpl-3-0
+//   license_steward_url  https://www.gnu.org/licenses/gpl-3.0.en.html
+// Mind the hyphen in the OSI form: OSI has since moved to the dotted
+// .../license/gpl-3.0 and 301s the hyphenated one to it, so the URL the bundled
+// table holds is now the redirecting one and today's "correct" dotted URL is
+// exactly the value that matches nothing. That is why pointing at
+// opensource.org still showed Proprietary. The gnu.org URL above is the more
+// stable alternative - it is the licence text itself, and carries no redirect.
+const TANGERINE_LICENSE_URL = 'https://opensource.org/license/gpl-3-0'
+const TANGERINE_SITE_URL = 'https://www.tangerinecentral.org/'
 
 function escapeXml(value) {
   return String(value)
@@ -803,20 +838,89 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;')
 }
 
-function formOnlineSurveyUrl(baseUrl, groupId, formId) {
+function formOnlineSurveyUrl(groupId, formId) {
   return `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
 }
 
-function formTinCanXmlUrl(baseUrl, groupId, formId, respectToken) {
+function formTinCanXmlUrl(groupId, formId, respectToken) {
   return `${baseUrl}/opds/tincan.xml/${groupId}/${formId}?respectToken=${respectToken}`
 }
 
-function formLaunchableAppManifestUrl(baseUrl, respectToken) {
-  return `${baseUrl}/respect-app-manifest/v2?respectToken=${respectToken}`
+function formLaunchableAppManifestUrl(respectToken) {
+  return `${baseUrl}/respect-app-manifest?respectToken=${respectToken}`
 }
 
 /**
- * Launchable-app manifest per the CURRENT RESPECT spec (README_LAUNCHABLE_APP.md):
+ * The publication for one form - the same object either way. The group listing
+ * feed emits it for every published form (/opds/groups/:groupId) and the
+ * publication detail endpoint emits it unchanged as its whole response
+ * (/opds/groups/:groupId/:formId), so the two cannot describe the same form
+ * differently.
+ *
+ * `modified` is the one field the two callers disagree on, so it stays a
+ * parameter: the listing stamps every form it lists with the group feed's
+ * modified value (it advertises them together, as one cacheable document),
+ * while the detail stamps the single form with its own content-derived value.
+ *
+ * Deliberately NOT included: readingOrder and resources. Those say how to fetch
+ * and render the unit and only the detail endpoint wants them - building them
+ * walks the whole release and tangy-form trees, which a listing feed would then
+ * pay once per form on every request. buildFormPublicationDetail() adds them.
+ */
+function buildFormPublication({ form, groupLabel, groupId, formId, respectToken, modified }) {
+  // Images. forms.json may list a full `images` array (with optional
+  // width/height), a single `cover` filename, or neither - in which case the
+  // generic form.png stands in, because RESPECT expects a publication to carry
+  // an image. Hrefs that are already absolute pass through; anything else is
+  // resolved against our own /opds/images/ mount, which is public and
+  // revalidatable (see the /opds/images/ handler above).
+  const images = []
+  if (form && Array.isArray(form.images) && form.images.length > 0) {
+    for (const img of form.images) {
+      const href = img.href.startsWith('http') ? img.href : `${baseUrl}/opds/images/${img.href}`
+      images.push({
+        href,
+        type: img.type || 'image/jpeg',
+        ...(img.height ? { height: img.height } : {}),
+        ...(img.width ? { width: img.width } : {})
+      })
+    }
+  } else if (form && form.cover) {
+    images.push({
+      href: `${baseUrl}/opds/images/${form.cover}`,
+      type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    })
+  } else {
+    images.push({ href: `${baseUrl}/opds/images/form.png`, type: 'image/png' })
+  }
+
+  return {
+    metadata: {
+      '@type': 'http://schema.org/Game',
+      title: (form && form.title) || formId,
+      author: groupLabel,
+      // Built from the same activityIdBase tincan.xml uses, so the activity the
+      // publication advertises is the activity an xAPI statement names.
+      identifier: `${activityIdBase}/${groupId}/${formId}`,
+      language: RESPECT_LANGUAGE,
+      modified
+    },
+    links: [
+      // self is the detail URL the listing advertises: a client resolves it to
+      // the full publication.
+      { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${respectToken}`, type: 'application/opds-publication+json' },
+      { rel: REL_TINCAN_XML, href: formTinCanXmlUrl(groupId, formId, respectToken), type: 'application/xml' },
+      { rel: REL_LAUNCHABLE_APP, href: formLaunchableAppManifestUrl(respectToken), type: 'application/opds-publication+json' },
+      // OPDS 2.0 section 5.1 requires at least one acquisition link - see
+      // REL_ACQUISITION_OPEN_ACCESS for why this one is not optional.
+      { rel: REL_ACQUISITION_OPEN_ACCESS, href: formOnlineSurveyUrl(groupId, formId), type: 'text/html' }
+    ],
+    images
+  }
+}
+
+/**
+ * Launchable-app manifest per the CURRENT RESPECT spec (README_ADD_YOUR_APP.md):
  * a Readium Web Publication Manifest describing the app.
  *
  * The app MAY link a default catalog of learning units via rel=collection
@@ -824,8 +928,21 @@ function formLaunchableAppManifestUrl(baseUrl, respectToken) {
  * units for browsing - the launcher only adds apps; units are reached through
  * the app's collection. Each unit (form) is also published as its own OPDS
  * publication with a tincan.xml link so it can be launched directly with xAPI.
+ *
+ * `identifier` is the app's own stable identity and is NOT the manifest URL
+ * (which is the rel=self href). It carries no language tag: the RESPECT
+ * reference manifest uses a plain `<origin>/app`, and where an app exists in
+ * several languages each variant is a separate manifest joined by `alternate`
+ * links, so a tag here would only make the identity move whenever it changed.
+ * Unlike the manifest URL it must not carry a respectToken, or the same app
+ * would present a different identity to every user.
+ *
+ * `author` is emitted in the shape the RESPECT reference manifest uses: an
+ * array of contributor objects whose `links` is an array of Link objects with
+ * just an href. `description` fills the metadata description the launcher
+ * reads into its stored publication record.
  */
-function buildLaunchableAppManifest(name, description, manifestUrl, appLaunchUri, collectionUrl) {
+function buildLaunchableAppManifest({ name, description, identifier, manifestUrl, appLaunchUri, collectionUrl, modified }) {
   const links = [
     { rel: 'self', href: manifestUrl, type: 'application/opds-publication+json' },
     { rel: REL_APP_LAUNCH_URI, href: appLaunchUri }
@@ -833,15 +950,27 @@ function buildLaunchableAppManifest(name, description, manifestUrl, appLaunchUri
   if (collectionUrl) {
     links.push({ rel: 'collection', href: collectionUrl, type: 'application/opds+json' })
   }
+  links.push(
+    { rel: REL_APPSTORE_ANDROID, href: TANGERINE_ANDROID_STORE_URL, title: 'Get it on Google Play' },
+    { rel: 'terms-of-service', href: TANGERINE_TERMS_URL },
+    { rel: 'license', href: TANGERINE_LICENSE_URL }
+  )
   return {
     metadata: {
       '@type': SCHEMA_LAUNCHABLE_APP,
       title: name,
-      author: {
-        name: 'Tangerine'
-      },
-      identifier: manifestUrl,
-      language: 'en-US'
+      description,
+      author: [
+        {
+          name: 'Tangerine',
+          links: [
+            { href: TANGERINE_SITE_URL }
+          ]
+        }
+      ],
+      identifier,
+      language: RESPECT_LANGUAGE,
+      modified
     },
     links,
     images: [
@@ -850,16 +979,31 @@ function buildLaunchableAppManifest(name, description, manifestUrl, appLaunchUri
   }
 }
 
+/**
+ * RESPECT launchable-app manifest per the CURRENT spec
+ * (README_ADD_YOUR_APP.md). Describes Tangerine as an app. Its default
+ * collection (rel=collection) is the hierarchical groups/forms catalog
+ * (/opds/groups), so adding this app in the launcher lets users browse groups
+ * and the forms within them; each form publication links its own tincan.xml so
+ * tapping one launches it with xAPI.
+ *
+ * @route GET /respect-app-manifest
+ * @returns {object} launchable-app manifest JSON
+ */
 app.get('/respect-app-manifest', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    // Original manifest: links to the groups catalog for the Tangerine app.
-    const manifest = buildRespectAppManifest(
-      'Tangerine',
-      'Tangerine data collection and reporting platform',
-      `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`,
-      `${baseUrl}`
-    )
+    const appModifiedMs = await getAppModified()
+    const manifestUrl = `${baseUrl}/respect-app-manifest?respectToken=${req.query.respectToken}`
+    const manifest = buildLaunchableAppManifest({
+      name: 'Tangerine',
+      description: 'Tangerine data collection and reporting platform',
+      identifier: `${baseUrl}/app`,
+      manifestUrl,
+      appLaunchUri: baseUrl,
+      collectionUrl: `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`,
+      modified: new Date(appModifiedMs).toISOString()
+    })
+    res.set('Last-Modified', new Date(appModifiedMs).toUTCString())
     res.set('Content-Type', 'application/json')
     res.send(manifest)
   } catch (error) {
@@ -868,66 +1012,6 @@ app.get('/respect-app-manifest', hasRespectToken, async function (req, res) {
   }
 })
 
-/**
- * RESPECT launchable-app manifest (parallel /v2) per the CURRENT spec
- * (README_LAUNCHABLE_APP.md). Describes Tangerine as an app. Its default
- * collection (rel=collection) is the hierarchical groups/forms catalog
- * (/opds/groups), so adding this app in the launcher lets users browse groups
- * and the forms within them; each form publication links its own tincan.xml so
- * tapping one launches it with xAPI.
- *
- * @route GET /respect-app-manifest/v2
- * @returns {object} launchable-app manifest JSON
- */
-app.get('/respect-app-manifest/v2', hasRespectToken, async function (req, res) {
-  try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    const manifestUrl = `${baseUrl}/respect-app-manifest/v2?respectToken=${req.query.respectToken}`
-    const manifest = buildLaunchableAppManifest(
-      'Tangerine',
-      'Tangerine data collection and reporting platform',
-      manifestUrl,
-      baseUrl,
-      `${baseUrl}/opds/groups?respectToken=${req.query.respectToken}`
-    )
-    res.set('Content-Type', 'application/json')
-    res.send(manifest)
-  } catch (error) {
-    console.error('Error generating Respect App Manifest (v2):', error)
-    res.status(500).send({ error: 'Failed to generate Respect App Manifest (v2)' })
-  }
-})
-
-
-/**
- * Per-form RESPECT endpoint.
- * Returns the form's OPDS publication manifest (a launchable learning unit) so
- * an admin can add / launch a SINGLE form directly in the launcher - the same
- * way you'd share a link to a Google Doc. The publication links to the form's
- * own tincan.xml so the launcher can launch it with xAPI.
- *
- * @route GET /respect-app-manifest/:groupId/:formId
- * @returns {object} OPDS publication manifest JSON
- */
-app.get('/respect-app-manifest/:groupId/:formId', hasRespectToken, async function (req, res) {
-  try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    const groupId = req.params.groupId
-    const formId = req.params.formId
-
-    // If a respectToken is present, verify the user has access to this group
-    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
-      return res.status(403).send({ error: 'Access denied to this group' })
-    }
-
-    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/forms')
-    res.set('Content-Type', 'application/opds-publication+json')
-    res.send(publication)
-  } catch (error) {
-    console.error('Error generating Respect App Manifest for form:', error)
-    res.status(500).send({ error: 'Failed to generate Respect App Manifest for form' })
-  }
-})
 
 /**
  * Serve a form's tincan.xml (Rustici launch method). Each published form is a
@@ -941,7 +1025,6 @@ app.get('/respect-app-manifest/:groupId/:formId', hasRespectToken, async functio
  */
 app.get('/opds/tincan.xml/:groupId/:formId', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupId = req.params.groupId
     const formId = req.params.formId
 
@@ -963,18 +1046,21 @@ app.get('/opds/tincan.xml/:groupId/:formId', hasRespectToken, async function (re
       // forms.json not found; use formId as title
     }
 
-    const activityId = `${baseUrl}/xapi/activities/${groupId}/${formId}`
-    const launchUrl = formOnlineSurveyUrl(baseUrl, groupId, formId)
+    const activityId = `${activityIdBase}/${groupId}/${formId}`
+    const launchUrl = formOnlineSurveyUrl(groupId, formId)
     const tincanXml = `<?xml version="1.0" encoding="UTF-8"?>
 <tincan xmlns="http://projecttincan.com/tincan.xsd">
   <activities>
     <activity id="${escapeXml(activityId)}" type="http://activitystrea.ms/schema/1.0/game">
       <name>${escapeXml(formTitle)}</name>
-      <description lang="en-US">${escapeXml(`Tangerine form: ${formTitle}`)}</description>
-      <launch lang="en-US">${escapeXml(launchUrl)}</launch>
+      <description lang="${RESPECT_LANGUAGE}">${escapeXml(`Tangerine form: ${formTitle}`)}</description>
+      <launch lang="${RESPECT_LANGUAGE}">${escapeXml(launchUrl)}</launch>
     </activity>
   </activities>
 </tincan>`
+    // No Last-Modified: this XML carries no modified value, so any file-derived
+    // header could move while the body stayed identical. The ETag Express
+    // generates for res.send is body-exact, so validation is already correct.
     res.set('Content-Type', 'application/xml')
     res.send(tincanXml)
   } catch (error) {
@@ -1172,6 +1258,57 @@ async function getFormModified(groupId, formId, formsPath) {
 }
 
 /**
+ * Newest onlineSurveys[].updatedOn recorded on a group doc, in ms (0 if none).
+ *
+ * publishSurvey/unpublishSurvey stamp `updatedOn` whenever a form is published or
+ * unpublished. Those changes alter the OPDS listings without touching any file on
+ * disk, so they MUST feed into the modified values below: RESPECT's
+ * OpdsFeedDataSourceDb.updateLocal only accepts an update whose
+ * OpdsFeedMetadata.modified is strictly newer than the value it stored last time,
+ * so a modified tracking only filesystem mtimes would make it reject exactly the
+ * publish/unpublish updates the launcher needs to see.
+ */
+function newestOnlineSurveyUpdatedOn(onlineSurveys) {
+  return (onlineSurveys || []).reduce((newest, survey) => {
+    const updatedOn = survey.updatedOn ? new Date(survey.updatedOn).getTime() : 0
+    return Number.isFinite(updatedOn) && updatedOn > newest ? updatedOn : newest
+  }, 0)
+}
+
+/**
+ * Content-derived "modified" for a whole group, in ms: the newest mtime across the
+ * group's forms.json, its client content, and its built release directory. The
+ * group-level counterpart of getFormModified() above.
+ */
+async function getGroupModified(groupId, formsPath) {
+  const [shared, groupSpecific] = await Promise.all([
+    cachedNewestMtimeMs([
+      '/tangerine/tangy-form',
+      '/tangerine/online-survey-app/dist/online-survey-app'
+    ]),
+    cachedNewestMtimeMs([
+      formsPath,
+      `/tangerine/groups/${groupId}/client`,
+      `/tangerine/client/releases/prod/online-survey-apps/${groupId}`
+    ])
+  ])
+  return Math.max(shared, groupSpecific)
+}
+
+/**
+ * Content-derived "modified" for the app itself, in ms: the newest mtime across the
+ * shared trees that make up the Tangerine online-survey app (the tangy-form
+ * component library and the built online-survey-app). This is the launchable-app
+ * manifest's metadata.modified, which the RESPECT spec includes.
+ */
+async function getAppModified() {
+  return cachedNewestMtimeMs([
+    '/tangerine/tangy-form',
+    '/tangerine/online-survey-app/dist/online-survey-app'
+  ])
+}
+
+/**
  * OPDS 2.0 Catalog of Groups (RESPECT / UstadMobile format).
  * Returns an OPDS Navigation Feed listing all Tangerine groups.
  * Each group entry links to its Readium Web Publication Manifest.
@@ -1181,7 +1318,6 @@ async function getFormModified(groupId, formId, formsPath) {
  */
 app.get('/opds/groups', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupsListLib = require('./groups-list.js')
     const GROUPS_DB = new DB('groups')
 
@@ -1193,11 +1329,21 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
     }
 
     const navigation = []
+    // Feed-level modified: RESPECT's OpdsFeedDataSourceDb.updateLocal only accepts an
+    // update whose OpdsFeedMetadata.modified is strictly newer than the value it
+    // stored last time, so this has to move whenever the nav feed can change.
+    let catalogModifiedMs = 0
 
     for (const groupId of groupIds) {
+      const groupFormsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
+      const formsModifiedMs = new Date(await getFormsModified(groupFormsPath)).getTime()
+      if (formsModifiedMs > catalogModifiedMs) catalogModifiedMs = formsModifiedMs
+
       try {
         const groupDoc = await GROUPS_DB.get(groupId)
         const label = groupDoc.label || groupId
+        const surveysModifiedMs = newestOnlineSurveyUpdatedOn(groupDoc.onlineSurveys)
+        if (surveysModifiedMs > catalogModifiedMs) catalogModifiedMs = surveysModifiedMs
         navigation.push({
           href: `${baseUrl}/opds/groups/${groupId}?respectToken=${req.query.respectToken}`,
           title: label,
@@ -1233,7 +1379,8 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
 
     const opdsCatalog = {
       metadata: {
-        title: 'Tangerine Groups'
+        title: 'Groups',
+        modified: new Date(catalogModifiedMs).toISOString()
       },
       links: [
         { rel: 'self', href: `${baseUrl}/opds/groups`, type: 'application/opds+json' }
@@ -1241,6 +1388,7 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
       navigation
     }
 
+    res.set('Last-Modified', new Date(catalogModifiedMs).toUTCString())
     res.set('Content-Type', 'application/opds+json')
     res.send(opdsCatalog)
   } catch (error) {
@@ -1259,7 +1407,6 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
  */
 app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupId = req.params.groupId
 
     // If a respectToken is present, verify the user has access to this group
@@ -1273,10 +1420,11 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
     // Get group metadata and published online surveys
     let groupLabel = groupId
     let publishedFormIds = []
+    let onlineSurveys = []
     try {
       const groupDoc = await GROUPS_DB.get(groupId)
       groupLabel = groupDoc.label || groupId
-      const onlineSurveys = groupDoc.onlineSurveys || []
+      onlineSurveys = groupDoc.onlineSurveys || []
       publishedFormIds = onlineSurveys.filter(s => s.published).map(s => s.formId)
     } catch (err) {
       // Group doc may not exist; continue with groupId as label
@@ -1289,7 +1437,14 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
     } catch (err) {
       forms = []
     }
-    const formsModified = await getFormsModified(formsPath)
+    // Feed-level modified. Has to move on every change that alters this feed: a
+    // form's content being re-released (content mtimes) or a survey being published
+    // / unpublished (onlineSurveys[].updatedOn - which touches no file on disk).
+    const feedModifiedMs = Math.max(
+      await getGroupModified(groupId, formsPath),
+      newestOnlineSurveyUpdatedOn(onlineSurveys)
+    )
+    const feedModified = new Date(feedModifiedMs).toISOString()
 
     // Filter to non-archived, listed forms that also have published online surveys
     const listedForms = forms
@@ -1300,45 +1455,21 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
     const publications = []
 
     for (const form of listedForms) {
-      const formId = form.id
-      const formTitle = form.title || formId
-      const formSrc = form.src || ''
-      const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
-
-      // Determine a cover image
-      const images = []
-      if (form.cover) {
-        images.push({
-          href: `${baseUrl}/opds/images/${form.cover}`,
-          type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
-        })
-      } else {
-        images.push({
-          href: `${baseUrl}/opds/images/form.png`,
-          type: 'image/png'
-        })
-      }
-
-      publications.push({
-        metadata: {
-          '@type': 'http://schema.org/Game',
-          title: formTitle,
-          author: groupLabel,
-          identifier: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`,
-          language: 'en',
-          modified: formsModified
-        },
-        links: [
-          { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}/${formId}?respectToken=${req.query.respectToken}`, type: 'application/opds-publication+json' },
-          { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
-        ],
-        images
-      })
+      publications.push(buildFormPublication({
+        form,
+        groupLabel,
+        groupId,
+        formId: form.id,
+        respectToken: req.query.respectToken,
+        // Feed-level value here, not this form's own - see buildFormPublication().
+        modified: feedModified
+      }))
     }
 
     const opdsCatalog = {
       metadata: {
-        title: `${groupLabel} - Forms`
+        title: `${groupLabel} - Forms`,
+        modified: feedModified
       },
       links: [
         { rel: 'self', href: `${baseUrl}/opds/groups/${groupId}?respectToken=${req.query.respectToken}`, type: 'application/opds+json' }
@@ -1346,6 +1477,7 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
       publications
     }
 
+    res.set('Last-Modified', new Date(feedModifiedMs).toUTCString())
     res.set('Content-Type', 'application/opds+json')
     res.send(opdsCatalog)
   } catch (error) {
@@ -1375,89 +1507,22 @@ async function getGroupMetadata(groupId) {
 }
 
 /**
- * Shared helper: read forms.json and return the non-archived, listed forms that
- * also have a published online survey, along with the stable modified date.
+ * The OPDS publication for a single form at its own URL, which is what the
+ * listing feed's rel=self link resolves to: the shared buildFormPublication()
+ * shell plus the two fields only a detail response carries, readingOrder (what
+ * to open) and resources (every file needed to render it offline). Served by
+ * /opds/groups/:groupId/:formId.
  */
-async function getListedPublishedForms(formsPath, publishedFormIds) {
-  let forms = []
-  try {
-    forms = await fs.readJson(formsPath)
-  } catch (err) {
-    // forms.json may not exist; use an empty list
-  }
-  const formsModified = await getFormsModified(formsPath)
-  const listedForms = forms
-    .filter(f => !f.archived && f.listed !== false && publishedFormIds.includes(f.id))
-    .sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id))
-  return { forms, formsModified, listedForms }
-}
-
-/**
- * Build the base OPDS publication object (metadata, links, images) for a form.
- * Used by the flat /opds/forms catalog so every form is listed directly (no
- * groups nesting), matching the RESPECT "list of learning units" model.
- */
-async function buildFormPublication(baseUrl, groupId, groupLabel, form, formsModified, respectToken) {
-  const formId = form.id
-  const formTitle = form.title || formId
-  const onlineSurveyUrl = formOnlineSurveyUrl(baseUrl, groupId, formId)
-  const tincanXmlUrl = formTinCanXmlUrl(baseUrl, groupId, formId, respectToken)
-  const selfUrl = `${baseUrl}/opds/forms/${groupId}/${formId}?respectToken=${respectToken}`
-
-  const images = []
-  if (form.cover) {
-    images.push({
-      href: `${baseUrl}/opds/images/${form.cover}`,
-      type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
-    })
-  } else {
-    images.push({
-      href: `${baseUrl}/opds/images/form.png`,
-      type: 'image/png'
-    })
-  }
-
-  return {
-    metadata: {
-      '@type': 'http://schema.org/Game',
-      title: formTitle,
-      author: groupLabel,
-      identifier: selfUrl,
-      language: 'en',
-      modified: formsModified
-    },
-    links: [
-      { rel: 'self', href: selfUrl, type: 'application/opds-publication+json' },
-      { rel: REL_TINCAN_XML, href: tincanXmlUrl, type: 'application/xml' },
-      { rel: REL_LAUNCHABLE_APP, href: formLaunchableAppManifestUrl(baseUrl, respectToken), type: 'application/opds-publication+json' },
-      { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
-    ],
-    images,
-    readingOrder: [
-      { href: onlineSurveyUrl, type: 'text/html' }
-    ]
-  }
-}
-
-/**
- * Build the full OPDS publication for a single form, including all resources
- * required to render the online survey offline. Shared by the flat
- * /opds/forms/:groupId/:formId route and the legacy /opds/groups/:groupId/:formId route.
- *
- * @param basePath - URL prefix for self/identifier links: 'opds/forms' or 'opds/groups'
- */
-async function buildFormPublicationDetail(baseUrl, groupId, formId, respectToken, basePath = 'opds/forms') {
+async function buildFormPublicationDetail(groupId, formId, respectToken) {
   const { groupLabel, formsPath } = await getGroupMetadata(groupId)
 
-  // Read forms.json to find the form definition
+  // forms.json supplies this form's title and images. A form missing from it - or
+  // a forms.json that cannot be read - still gets a publication, titled with its
+  // formId and falling back to the generic cover.
   let form = null
-  let formTitle = formId
   try {
     const forms = await fs.readJson(formsPath)
     form = forms.find(f => f.id === formId)
-    if (form && form.title) {
-      formTitle = form.title
-    }
   } catch (err) {
     // forms.json not found; use formId as title
   }
@@ -1466,32 +1531,6 @@ async function buildFormPublicationDetail(baseUrl, groupId, formId, respectToken
   // body does not change then its ETag does not change either and the client
   // keeps the old copy indefinitely via 304.
   const formsModified = await getFormModified(groupId, formId, formsPath)
-
-  const onlineSurveyUrl = `${baseUrl}/releases/prod/online-survey-apps/${groupId}/${formId}/#/form/${formId}`
-
-  // Build images from form definition
-  const images = []
-  if (form && Array.isArray(form.images)) {
-    for (const img of form.images) {
-      const href = img.href.startsWith('http') ? img.href : `${baseUrl}/opds/images/${img.href}`
-      images.push({
-        href,
-        type: img.type || 'image/jpeg',
-        ...(img.height ? { height: img.height } : {}),
-        ...(img.width ? { width: img.width } : {})
-      })
-    }
-  } else if (form && form.cover) {
-    images.push({
-      href: `${baseUrl}/opds/images/${form.cover}`,
-      type: form.cover.endsWith('.png') ? 'image/png' : 'image/jpeg'
-    })
-  } else {
-    images.push({
-      href: `${baseUrl}/opds/images/form.png`,
-      type: 'image/png'
-    })
-  }
 
   // Build resources: list all files required to render the online survey form.
   // This includes both the Angular app shell files (from the dist) and the
@@ -1572,117 +1611,30 @@ async function buildFormPublicationDetail(baseUrl, groupId, formId, respectToken
   }
 
   return {
-    metadata: {
-      '@type': 'http://schema.org/Game',
-      title: formTitle,
-      author: groupLabel,
-      identifier: `${baseUrl}/${basePath}/${groupId}/${formId}?respectToken=${respectToken}`,
-      language: 'en',
+    ...buildFormPublication({
+      form,
+      groupLabel,
+      groupId,
+      formId,
+      respectToken,
       modified: formsModified
-    },
-    links: [
-      { rel: 'self', href: `${baseUrl}/${basePath}/${groupId}/${formId}?respectToken=${respectToken}`, type: 'application/opds-publication+json' },
-      { rel: REL_TINCAN_XML, href: formTinCanXmlUrl(baseUrl, groupId, formId, respectToken), type: 'application/xml' },
-      { rel: REL_LAUNCHABLE_APP, href: formLaunchableAppManifestUrl(baseUrl, respectToken), type: 'application/opds-publication+json' },
-      { rel: 'http://opds-spec.org/acquisition/open-access', href: onlineSurveyUrl, type: 'text/html' }
-    ],
-    images,
+    }),
     readingOrder: [
-      { href: onlineSurveyUrl, type: 'text/html' }
+      { href: formOnlineSurveyUrl(groupId, formId), type: 'text/html' }
     ],
     resources
   }
 }
 
 /**
- * OPDS 2.0 Flat Catalog of Forms (RESPECT / UstadMobile "list of learning units").
- * Returns a single Publication Listing of every published online-survey form
- * across all groups the user can access. There is no groups nesting — each form
- * is listed directly, so the RESPECT launcher shows "forms" like a list of
- * individually shared links.
- *
- * @route GET /opds/forms
- * @returns {object} OPDS 2.0 Publication Listing JSON
- */
-app.get('/opds/forms', hasRespectToken, async function (req, res) {
-  try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    const groupsListLib = require('./groups-list.js')
-
-    let groupIds = await groupsListLib()
-    // If a respectToken is present, filter to user's allowed groups
-    if (req.respectUser) {
-      groupIds = groupIds.filter(id => req.respectUser.allowedGroupIds.includes(id))
-    }
-
-    const publications = []
-    for (const groupId of groupIds) {
-      const { groupLabel, publishedFormIds, formsPath } = await getGroupMetadata(groupId)
-      const { listedForms, formsModified } = await getListedPublishedForms(formsPath, publishedFormIds)
-      for (const form of listedForms) {
-        publications.push(await buildFormPublication(baseUrl, groupId, groupLabel, form, formsModified, req.query.respectToken))
-      }
-    }
-
-    publications.sort((a, b) => a.metadata.title.localeCompare(b.metadata.title))
-
-    const opdsCatalog = {
-      metadata: {
-        title: 'Tangerine Forms'
-      },
-      links: [
-        { rel: 'self', href: `${baseUrl}/opds/forms?respectToken=${req.query.respectToken}`, type: 'application/opds+json' }
-      ],
-      publications
-    }
-
-    res.set('Content-Type', 'application/opds+json')
-    res.send(opdsCatalog)
-  } catch (error) {
-    console.error('Error generating OPDS Forms catalog:', error)
-    res.status(500).send({ error: 'Failed to generate OPDS Forms catalog' })
-  }
-})
-
-/**
- * OPDS 2.0 Publication Detail for a Form (flat path).
- * Returns full publication metadata, links, images, and resources for a single
- * form, pointing to the online-survey-app URL.
- *
- * @route GET /opds/forms/:groupId/:formId
- * @returns {object} OPDS 2.0 Publication JSON
- */
-app.get('/opds/forms/:groupId/:formId', hasRespectToken, async function (req, res) {
-  try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
-    const groupId = req.params.groupId
-    const formId = req.params.formId
-
-    // If a respectToken is present, verify the user has access to this group
-    if (req.respectUser && !req.respectUser.allowedGroupIds.includes(groupId)) {
-      return res.status(403).send({ error: 'Access denied to this group' })
-    }
-
-    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/forms')
-
-    res.set('Content-Type', 'application/opds-publication+json')
-    res.send(publication)
-  } catch (error) {
-    console.error('Error generating OPDS publication for form:', error)
-    res.status(500).send({ error: 'Failed to generate OPDS publication for form' })
-  }
-})
-
-/**
- * OPDS 2.0 Publication Detail for a Form (legacy groups path, kept for backward
- * compatibility). Delegates to the same shared helper as the flat route.
+ * OPDS 2.0 Publication Detail for a Form. The self link emitted by the group
+ * listing (/opds/groups/:groupId) resolves here.
  *
  * @route GET /opds/groups/:groupId/:formId
  * @returns {object} OPDS 2.0 Publication JSON
  */
 app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, res) {
   try {
-    const baseUrl = `${process.env.T_PROTOCOL}://${process.env.T_HOST_NAME}`
     const groupId = req.params.groupId
     const formId = req.params.formId
 
@@ -1691,9 +1643,10 @@ app.get('/opds/groups/:groupId/:formId', hasRespectToken, async function (req, r
       return res.status(403).send({ error: 'Access denied to this group' })
     }
 
-    const publication = await buildFormPublicationDetail(baseUrl, groupId, formId, req.query.respectToken, 'opds/groups')
+    const publication = await buildFormPublicationDetail(groupId, formId, req.query.respectToken)
 
     res.set('Content-Type', 'application/opds-publication+json')
+    res.set('Last-Modified', new Date(publication.metadata.modified).toUTCString())
     res.send(publication)
   } catch (error) {
     console.error('Error generating OPDS publication for form:', error)

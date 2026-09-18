@@ -1,6 +1,5 @@
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { HttpClient } from '@angular/common/http';
 import { Breadcrumb } from 'src/app/shared/_components/breadcrumb/breadcrumb.component';
 import { TangyErrorHandler } from 'src/app/shared/_services/tangy-error-handler.service';
 import { _TRANSLATE } from 'src/app/shared/_services/translation-marker';
@@ -25,8 +24,6 @@ export class ReleaseOnlineSurveyComponent implements OnInit {
   unPublishedSurveys;
   dialogRef:any
   panelOpenState: boolean = false;
-  baseUrl = window.location.origin;
-  respectToken = '';
 
   constructor(private route: ActivatedRoute,
     private groupService: GroupsService,
@@ -34,7 +31,6 @@ export class ReleaseOnlineSurveyComponent implements OnInit {
     private tangyFormService: TangerineFormsService,
     private processMonitorService: ProcessMonitorService,
     private dialog: MatDialog,
-    private httpClient: HttpClient,
   ) { }
 
   async ngOnInit() {
@@ -60,26 +56,6 @@ export class ReleaseOnlineSurveyComponent implements OnInit {
     })
 
     await this.getForms();
-    try {
-      // Used to build per-form RESPECT share links (like a Google Docs link).
-      // The server resolves the token for every user, including user1.
-      // respectUrl also tells us the host the server advertises (T_PROTOCOL +
-      // T_HOST_NAME). We use its origin (not window.location.origin) so copied
-      // links work from devices/emulators, where 'localhost' is unreachable.
-      const result: any = await this.httpClient.get('/users/respectUrl').toPromise();
-      const data = result?.data;
-      this.respectToken = data?.respectToken || '';
-      if (data?.respectUrl) {
-        try {
-          this.baseUrl = new URL(data.respectUrl).origin;
-        } catch (err) {
-          // Fall back to window.location.origin if the URL is malformed.
-        }
-      }
-    } catch (error) {
-      console.error(error);
-      this.respectToken = '';
-    }
   }
 
   async getForms() {
@@ -119,63 +95,6 @@ export class ReleaseOnlineSurveyComponent implements OnInit {
       this.errorHandler.handleError(_TRANSLATE('Could Not Contact Server.'));
     } finally {
       this.processMonitorService.stop(process.id);
-    }
-  }
-
-  /**
-   * RESPECT app feed link (parallel /v2 manifest): points the RESPECT launcher
-   * at the flat list of all published online-survey forms.
-   */
-  getRespectAppUrl() {
-    if (!this.respectToken) {
-      return '';
-    }
-    return `${this.baseUrl}/respect-app-manifest/v2?respectToken=${this.respectToken}`;
-  }
-
-  /**
-   * Per-form RESPECT share link. This lets an admin add an individual form to
-   * the UstadMobile/RESPECT launcher by pasting the URL, like sharing a link to
-   * a Google Doc.
-   */
-  getRespectUrl(form) {
-    if (!this.respectToken) {
-      return '';
-    }
-    return `${this.baseUrl}/respect-app-manifest/${this.groupId}/${form.id}?respectToken=${this.respectToken}`;
-  }
-
-  copyRespectLink(form) {
-    const url = this.getRespectUrl(form);
-    if (!url) {
-      this.errorHandler.handleError(_TRANSLATE('RESPECT link unavailable. Ask a server administrator to generate your RESPECT token.'));
-      return;
-    }
-    this.copyText(url, _TRANSLATE('RESPECT link copied to clipboard.'));
-  }
-
-  copyRespectAppLink() {
-    const url = this.getRespectAppUrl();
-    if (!url) {
-      this.errorHandler.handleError(_TRANSLATE('RESPECT link unavailable. Ask a server administrator to generate your RESPECT token.'));
-      return;
-    }
-    this.copyText(url, _TRANSLATE('RESPECT app link copied to clipboard.'));
-  }
-
-  private copyText(url: string, successMessage: string) {
-    try {
-      navigator.clipboard.writeText(url);
-      this.errorHandler.handleError(successMessage);
-    } catch (error) {
-      // Fallback for browsers without async clipboard API
-      const input = document.createElement('input');
-      input.value = url;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand('copy');
-      document.body.removeChild(input);
-      this.errorHandler.handleError(successMessage);
     }
   }
 

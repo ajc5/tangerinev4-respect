@@ -9,6 +9,41 @@ h2 {
   margin: 0px 0px 20px 20px;
 }
 
+/* The RESPECT link field is deliberately a plain input rather than a
+   mat-form-field. Material 15 defaults every field to the 'fill' appearance,
+   which adds inner padding, darkens the background on hover/focus, and
+   highlights the underline in the primary blue - none of which match the
+   underline-only, orange-highlighted text fields used across Tangerine.
+   The 20px left inset matches the h2 section headings above. */
+.respect-link-block {
+  margin: 16px 0 24px 20px;
+}
+.respect-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.respect-link-label {
+  display: block;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.54);
+}
+.respect-link-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+  background: transparent;
+  padding: 4px 0;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--primary-text-color);
+}
+.respect-link-input:focus {
+  outline: none;
+  border-bottom: 2px solid var(--lighter-accent-color);
+}
+
 /* TODO(mdc-migration): The following rule targets internal classes of tabs that may no longer apply for the MDC version. */
 mat-table {
   margin-bottom: 20px;
