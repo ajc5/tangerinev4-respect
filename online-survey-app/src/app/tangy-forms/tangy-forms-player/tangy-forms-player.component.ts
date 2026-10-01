@@ -264,6 +264,21 @@ private validateEndpoint(value: string | null): string | undefined {
     }
   }
 
+  /**
+   * The ADL xAPI wrapper resolves its endpoint resources by concatenation
+   * (`endpoint + "statements"`, `endpoint + "activities/state?..."`, ...) rather than by
+   * URL resolution, so an endpoint that does not end with "/" produces a joined URL.
+   * For a RESPECT assignment launch that joined segment is decoded by the launcher as
+   * the assignment activity id, corrupting it.
+   *
+   * Deliberately a plain string append: parsing and re-serializing through URL would
+   * normalize the endpoint (dropping an explicit default port, a fragment, ...) and the
+   * endpoint string is also what RESPECT uses to identify the school.
+   */
+  private ensureTrailingSlash(endpoint: string): string {
+    return endpoint.endsWith('/') ? endpoint : `${endpoint}/`;
+  }
+
   // Prevent parallel saves which leads to race conditions. Only save the first and then last state of the store.
   // Everything else in between we can ignore.
   async throttledSaveResponse(response) {
@@ -413,9 +428,16 @@ private validateEndpoint(value: string | null): string | undefined {
       return;
     }
 
-    // Configure ADL wrapper (same as in respect.html)
+    // Configure ADL wrapper (same as in respect.html). The wrapper builds its request
+    // URLs by plain concatenation (`this.lrs.endpoint + "statements"`), so the endpoint
+    // MUST end with "/". A RESPECT assignment launch hands us an endpoint whose last
+    // path segment is the assignment id ( .../openeel_assignment/<encoded id> ), and the
+    // launcher's embedded xAPI endpoint reads the segment that follows
+    // "openeel_assignment". Without the slash the two run together into
+    // "<assignment id>statements", which no longer matches the assignment's activity id,
+    // so the assignment never shows as completed however complete the statements are.
     ADL.XAPIWrapper.changeConfig({
-      endpoint: this.lrsEndpoint,
+      endpoint: this.ensureTrailingSlash(this.lrsEndpoint),
       auth: this.lrsAuth
     });
 
