@@ -857,10 +857,14 @@ function formLaunchableAppManifestUrl(respectToken) {
  * (/opds/groups/:groupId/:formId), so the two cannot describe the same form
  * differently.
  *
- * `modified` is the one field the two callers disagree on, so it stays a
- * parameter: the listing stamps every form it lists with the group feed's
- * modified value (it advertises them together, as one cacheable document),
- * while the detail stamps the single form with its own content-derived value.
+ * `modified` stays a parameter because each caller supplies the form's OWN
+ * content-derived value (getFormModifiedMs). The listing stamps every form it
+ * emits with its own value - so a change to one form restamps only that form -
+ * and the detail stamps the single form with the same value, so the listing and
+ * the rel=self document cannot disagree about when that form changed.
+ * Restamping every publication with one group-wide value is deliberately avoided:
+ * it made adding or removing a form look like every form had changed, and it hid
+ * a change to one form behind a shared value that never moved with it.
  *
  * Deliberately NOT included: readingOrder and resources. Those say how to fetch
  * and render the unit and only the detail endpoint wants them - building them
@@ -1149,30 +1153,16 @@ async function listClientFiles(dirPath, baseDir, ignorePatterns = ['node_modules
   return results
 }
 
-// Stable modification date for OPDS publication metadata. Derived from the
-// mtime of the group's forms.json so the response body — and therefore the ETag
-// used for If-None-Match cache validation — stays stable between requests
-// instead of changing every second (which would defeat HTTP caching).
-//
-// This is group-level and only used by the LISTING feeds, which advertise the
-// detail URL and nothing else, so forms.json is an adequate sentinel there. The
-// per-form descriptor uses getFormModified() below instead.
-async function getFormsModified(formsPath) {
-  try {
-    const stat = await fs.stat(formsPath)
-    return stat.mtime.toISOString()
-  } catch (err) {
-    // forms.json may not exist yet; use a stable epoch value.
-    return new Date(0).toISOString()
-  }
-}
-
 // Newest mtime (ms) across a set of files/directories. Directories are walked
 // recursively (skipping heavy/irrelevant trees), and the result is memoised
 // briefly so a burst of OPDS requests does not re-walk the tree every time.
 const MODIFIED_MTIME_TTL_MS = 5000
 const modifiedMtimeCache = new Map()
-const MODIFIED_WALK_SKIP = ['node_modules', '.git']
+// `client-uploads` holds media uploaded from devices and grows with every
+// submission. Walking it would move the modified values for reasons that have
+// nothing to do with published content, and would stat a potentially large tree
+// on every request.
+const MODIFIED_WALK_SKIP = ['node_modules', '.git', 'client-uploads']
 
 async function newestMtimeMs(paths) {
   let newest = 0
@@ -1224,37 +1214,111 @@ async function cachedNewestMtimeMs(paths) {
   return value
 }
 
+// The shared trees every release copies from or is served out of (the tangy-form
+// component library and the built online-survey-app). A change here is a content
+// change for every form, so it belongs in each form's own modified value.
+const SHARED_CONTENT_PATHS = [
+  '/tangerine/tangy-form',
+  '/tangerine/online-survey-app/dist/online-survey-app'
+]
+
 /**
- * Content-derived "modified" for a single form.
+ * Newest mtime (ms) under `rootDir`, both in total and per top-level directory.
+ *
+ * `byDir` is what lets a form own its modified value: each top-level directory
+ * under the group's client/ (and each child of its release directory) is one
+ * form. Files sitting directly under the root are group-level (forms.json,
+ * translations, custom-scripts.js) - they count towards `newest` but belong to
+ * no single form.
+ */
+async function newestMtimeMsByTopLevelDir(rootDir) {
+  const byDir = new Map()
+  let newest = 0
+  let entries
+  try {
+    entries = await fs.readdir(rootDir, { withFileTypes: true })
+  } catch (err) {
+    return { byDir, newest }
+  }
+  await Promise.all(entries.map(async (entry) => {
+    if (MODIFIED_WALK_SKIP.includes(entry.name)) return
+    const fullPath = path.join(rootDir, entry.name)
+    if (entry.isDirectory()) {
+      const ms = await newestMtimeMs([fullPath])
+      byDir.set(entry.name, ms)
+      if (ms > newest) newest = ms
+    } else if (entry.isFile()) {
+      try {
+        const stat = await fs.stat(fullPath)
+        if (stat.mtimeMs > newest) newest = stat.mtimeMs
+      } catch (err) {
+        // Vanished mid-walk; ignore.
+      }
+    }
+  }))
+  return { byDir, newest }
+}
+
+/**
+ * One pair of tree walks per group per TTL, shared by every publication in the
+ * list AND by the feed head, so listing N forms does not cost N tree walks.
+ *
+ * Returns:
+ *  * sharedMs - the shared app trees (the same for every form, in every group)
+ *  * byForm   - formId -> newest mtime (ms) of that form's own source + release
+ *  * newestMs - newest mtime (ms) anywhere in the group, group-level files such
+ *               as forms.json included
+ *
+ * forms.json is deliberately NOT part of any form's own value. It is a single
+ * shared file, so its mtime cannot say WHICH form changed; folding it in is
+ * exactly what made adding, removing or re-ordering a form restamp every form in
+ * the list. It still feeds `newestMs`, which is where "the listing itself
+ * changed" belongs.
+ */
+async function getGroupContentIndex(groupId) {
+  const cacheKey = `groupContentIndex|${groupId}`
+  const now = Date.now()
+  const cached = modifiedMtimeCache.get(cacheKey)
+  if (cached && (now - cached.at) < MODIFIED_MTIME_TTL_MS) return cached.value
+
+  const [sharedMs, client, release] = await Promise.all([
+    cachedNewestMtimeMs(SHARED_CONTENT_PATHS),
+    newestMtimeMsByTopLevelDir(`/tangerine/groups/${groupId}/client`),
+    newestMtimeMsByTopLevelDir(`/tangerine/client/releases/prod/online-survey-apps/${groupId}`)
+  ])
+  const byForm = new Map(client.byDir)
+  for (const [formId, ms] of release.byDir) {
+    if (ms > (byForm.get(formId) || 0)) byForm.set(formId, ms)
+  }
+  const index = {
+    sharedMs,
+    byForm,
+    newestMs: Math.max(client.newest, release.newest)
+  }
+  modifiedMtimeCache.set(cacheKey, { at: now, value: index })
+  return index
+}
+
+/**
+ * Content-derived "modified" for a single form, in ms.
  *
  * The publication body feeds the ETag Express generates for res.send, so this
- * value MUST change whenever anything the client has to download changes.
- * Deriving it from the group's forms.json alone was not sufficient: re-releasing
- * a form (new form HTML, new translations, a fixed tangy-form library) leaves
- * forms.json untouched, so the body - and therefore the ETag - stayed
- * byte-identical and a client that already had the form kept its stale copy
- * forever via 304.
+ * value MUST change whenever anything the client has to download changes: the
+ * form's source (form.html, translations, media), its built release, and the
+ * shared trees the release copies from or is served out of. Re-releasing leaves
+ * forms.json untouched, which is why a forms.json-only sentinel was not enough.
  *
- * Covers everything the release serves: the form source, the built release
- * bundle, and the shared trees the release copies from or is served out of.
- * The shared trees are cached separately so they are walked once per TTL
- * regardless of how many forms are being requested.
+ * Only THIS form's own files are included. Another form changing, the listing
+ * being rewritten, or a form being published/unpublished leaves this value alone.
  */
-async function getFormModified(groupId, formId, formsPath) {
-  const [shared, formSpecific] = await Promise.all([
-    cachedNewestMtimeMs([
-      '/tangerine/tangy-form',
-      '/tangerine/online-survey-app/dist/online-survey-app'
-    ]),
-    cachedNewestMtimeMs([
-      formsPath,
-      `/tangerine/groups/${groupId}/client/${formId}`,
-      `/tangerine/client/releases/prod/online-survey-apps/${groupId}/${formId}`
-    ])
-  ])
-  const newest = Math.max(shared, formSpecific)
-  // Nothing found: keep the stable epoch value so the response stays cacheable.
-  return new Date(newest).toISOString()
+async function getFormModifiedMs(groupId, formId) {
+  const index = await getGroupContentIndex(groupId)
+  return Math.max(index.sharedMs, index.byForm.get(formId) || 0)
+}
+
+/** getFormModifiedMs() as the ISO string metadata.modified needs. */
+async function getFormModified(groupId, formId) {
+  return new Date(await getFormModifiedMs(groupId, formId)).toISOString()
 }
 
 /**
@@ -1262,11 +1326,15 @@ async function getFormModified(groupId, formId, formsPath) {
  *
  * publishSurvey/unpublishSurvey stamp `updatedOn` whenever a form is published or
  * unpublished. Those changes alter the OPDS listings without touching any file on
- * disk, so they MUST feed into the modified values below: RESPECT's
+ * disk, so they MUST feed into the FEED-level modified value: RESPECT's
  * OpdsFeedDataSourceDb.updateLocal only accepts an update whose
  * OpdsFeedMetadata.modified is strictly newer than the value it stored last time,
  * so a modified tracking only filesystem mtimes would make it reject exactly the
  * publish/unpublish updates the launcher needs to see.
+ *
+ * Deliberately NOT folded into a form's own value: publishing or unpublishing one
+ * form is a change to the LISTING, not to that form's content, and every other
+ * form in the list certainly did not change.
  */
 function newestOnlineSurveyUpdatedOn(onlineSurveys) {
   return (onlineSurveys || []).reduce((newest, survey) => {
@@ -1276,23 +1344,17 @@ function newestOnlineSurveyUpdatedOn(onlineSurveys) {
 }
 
 /**
- * Content-derived "modified" for a whole group, in ms: the newest mtime across the
- * group's forms.json, its client content, and its built release directory. The
- * group-level counterpart of getFormModified() above.
+ * Content-derived "modified" for a whole group, in ms - the FEED-level value.
+ *
+ * It is a superset of every form's own value (getFormModifiedMs), so the feed
+ * head always reports at least as new as the newest form it lists, which is what
+ * RESPECT's strictly-newer rule depends on. It also moves when the LISTING itself
+ * changes - adding, removing or re-ordering a form rewrites forms.json - while the
+ * individual forms keep their own values, because none of their content changed.
  */
-async function getGroupModified(groupId, formsPath) {
-  const [shared, groupSpecific] = await Promise.all([
-    cachedNewestMtimeMs([
-      '/tangerine/tangy-form',
-      '/tangerine/online-survey-app/dist/online-survey-app'
-    ]),
-    cachedNewestMtimeMs([
-      formsPath,
-      `/tangerine/groups/${groupId}/client`,
-      `/tangerine/client/releases/prod/online-survey-apps/${groupId}`
-    ])
-  ])
-  return Math.max(shared, groupSpecific)
+async function getGroupModifiedMs(groupId) {
+  const index = await getGroupContentIndex(groupId)
+  return Math.max(index.sharedMs, index.newestMs)
 }
 
 /**
@@ -1302,10 +1364,7 @@ async function getGroupModified(groupId, formsPath) {
  * manifest's metadata.modified, which the RESPECT spec includes.
  */
 async function getAppModified() {
-  return cachedNewestMtimeMs([
-    '/tangerine/tangy-form',
-    '/tangerine/online-survey-app/dist/online-survey-app'
-  ])
+  return cachedNewestMtimeMs(SHARED_CONTENT_PATHS)
 }
 
 /**
@@ -1332,12 +1391,18 @@ app.get('/opds/groups', hasRespectToken, async function (req, res) {
     // Feed-level modified: RESPECT's OpdsFeedDataSourceDb.updateLocal only accepts an
     // update whose OpdsFeedMetadata.modified is strictly newer than the value it
     // stored last time, so this has to move whenever the nav feed can change.
+    //
+    // It is the newest of the groups' OWN content-derived values (getGroupModified:
+    // each group's forms.json, client content and releases) plus their publish
+    // bookkeeping. Note the entries below are OPDS navigation Link Objects, which
+    // have no metadata block, so a per-group date cannot be expressed in this feed;
+    // the head is the only place it can carry one. A group's own date is published
+    // where it is meaningful: as the form list's head at /opds/groups/:groupId.
     let catalogModifiedMs = 0
 
     for (const groupId of groupIds) {
-      const groupFormsPath = `/tangerine/client/content/groups/${groupId}/forms.json`
-      const formsModifiedMs = new Date(await getFormsModified(groupFormsPath)).getTime()
-      if (formsModifiedMs > catalogModifiedMs) catalogModifiedMs = formsModifiedMs
+      const groupModifiedMs = await getGroupModifiedMs(groupId)
+      if (groupModifiedMs > catalogModifiedMs) catalogModifiedMs = groupModifiedMs
 
       try {
         const groupDoc = await GROUPS_DB.get(groupId)
@@ -1437,34 +1502,41 @@ app.get('/opds/groups/:groupId', hasRespectToken, async function (req, res) {
     } catch (err) {
       forms = []
     }
-    // Feed-level modified. Has to move on every change that alters this feed: a
-    // form's content being re-released (content mtimes) or a survey being published
-    // / unpublished (onlineSurveys[].updatedOn - which touches no file on disk).
-    const feedModifiedMs = Math.max(
-      await getGroupModified(groupId, formsPath),
-      newestOnlineSurveyUpdatedOn(onlineSurveys)
-    )
-    const feedModified = new Date(feedModifiedMs).toISOString()
-
     // Filter to non-archived, listed forms that also have published online surveys
     const listedForms = forms
       .filter(f => !f.archived && f.listed !== false && publishedFormIds.includes(f.id))
       .sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id))
 
-    // Build publications array
-    const publications = []
+    // Each form carries its OWN content-derived modified (its source, its release
+    // and the shared app trees), so editing or re-releasing one form restamps only
+    // that form - not every form in the list.
+    const publicationModifiedsMs = await Promise.all(
+      listedForms.map(form => getFormModifiedMs(groupId, form.id))
+    )
+    const publications = listedForms.map((form, index) => buildFormPublication({
+      form,
+      groupLabel,
+      groupId,
+      formId: form.id,
+      respectToken: req.query.respectToken,
+      modified: new Date(publicationModifiedsMs[index]).toISOString()
+    }))
 
-    for (const form of listedForms) {
-      publications.push(buildFormPublication({
-        form,
-        groupLabel,
-        groupId,
-        formId: form.id,
-        respectToken: req.query.respectToken,
-        // Feed-level value here, not this form's own - see buildFormPublication().
-        modified: feedModified
-      }))
-    }
+    // The feed head reports the newest of what it contains. getGroupModified covers
+    // the LISTING itself - forms.json being rewritten when a form is added, removed
+    // or re-ordered - and newestOnlineSurveyUpdatedOn() covers publish/unpublish,
+    // which touches no file on disk. Both move the head without touching any
+    // individual form's modified, which is right: the number of forms in the list
+    // changed, not the forms.
+    //
+    // Spreading the item values in also guarantees the head is never OLDER than a
+    // publication it lists, which RESPECT's strictly-newer rule depends on.
+    const feedModifiedMs = Math.max(
+      await getGroupModifiedMs(groupId),
+      newestOnlineSurveyUpdatedOn(onlineSurveys),
+      ...publicationModifiedsMs
+    )
+    const feedModified = new Date(feedModifiedMs).toISOString()
 
     const opdsCatalog = {
       metadata: {
@@ -1526,11 +1598,12 @@ async function buildFormPublicationDetail(groupId, formId, respectToken) {
   } catch (err) {
     // forms.json not found; use formId as title
   }
-  // Content-derived, NOT forms.json mtime alone: a re-release changes what the
-  // client must download without touching forms.json, and if the publication
-  // body does not change then its ETag does not change either and the client
-  // keeps the old copy indefinitely via 304.
-  const formsModified = await getFormModified(groupId, formId, formsPath)
+  // This form's own content-derived value - the same one the listing stamps on it,
+  // so the two documents always agree. NOT forms.json mtime: a re-release changes
+  // what the client must download without touching forms.json, and if the body
+  // does not change then its ETag does not change either and the client keeps the
+  // old copy indefinitely via 304.
+  const formsModified = await getFormModified(groupId, formId)
 
   // Build resources: list all files required to render the online survey form.
   // This includes both the Angular app shell files (from the dist) and the

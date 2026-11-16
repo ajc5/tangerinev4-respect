@@ -6,8 +6,19 @@ services:
       context: ..
       dockerfile: dockerhub/Dockerfile.couchdb
     restart: unless-stopped
+    # Keep the CouchDB server admin in sync with .env on every (re)create.
+    # NOTE: the password in .env must be single-quoted if it contains a dollar
+    # sign, otherwise Compose interpolates it and all clients get a mangled
+    # T_COUCHDB_ENDPOINT (401 -> CouchDB account lockout).
+    environment:
+      - COUCHDB_USER=${T_COUCHDB_USER_ADMIN_NAME:-admin}
+      - COUCHDB_PASSWORD=${T_COUCHDB_USER_ADMIN_PASS:-password}
     volumes:
       - couchdb-data:/opt/couchdb/data
+      # Persist the runtime config (admin password hash + node uuid) outside
+      # the container layer so recreating the container neither reverts the
+      # admin password nor mints a new node uuid.
+      - ./couchdb/local.d:/opt/couchdb/etc/local.d
 
   server:
     image: ${IMAGE_PREFIX:-albjo}/tangerine-server:${T_TAG:-latest}
