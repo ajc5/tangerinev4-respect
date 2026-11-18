@@ -11,7 +11,19 @@
 @import './_tangy-app-variables.scss';
 @import "./tangerine-theme.scss";
 
-html {
+/*
+ * Declare the theme on body as well as html.
+ *
+ * tangy-form pulls in @polymer/paper-styles/default-theme.html, which appends a
+ * <custom-style> to document.head at runtime (from polyfills.js) that sets
+ *   html { --primary-color: var(--paper-indigo-500); --accent-color: var(--paper-pink-a200); }
+ * That rule wins over this one (same specificity, injected later), which is why
+ * headings were navy #3f51b5 and buttons pink #ff4081. Declaring the variables
+ * on body means everything inside body inherits the Tangerine theme regardless
+ * of where Polymer's defaults land in the head. (Same reason editor/src/styles.css
+ * uses `html, body`.)
+ */
+html, body {
 
   /* Background color of the document */
   --document-background-color: #FFF;
