@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { xapiDebug } from './xapi-debug';
 
 @Injectable({
   providedIn: 'root'
@@ -42,11 +43,11 @@ export class XapiService {
   async sendStatements(statements: any[], lrsEndpointUrl:string, auth: string): Promise<any> {
     const headers = this.getHeaders(auth);
     const endpoint = this.normalizeEndpointUrl(lrsEndpointUrl) + "/statements";
-    console.log('[xAPI Service] POST to', endpoint);
+    xapiDebug('[xAPI Service] POST to', endpoint);
     try {
       const response = await this.http.post(endpoint, statements, { headers, observe: 'response' }).toPromise();
-      console.log('[xAPI Service] Response status:', response?.status, response?.statusText);
-      console.log('[xAPI Service] Response body:', response?.body);
+      xapiDebug('[xAPI Service] Response status:', response?.status, response?.statusText);
+      xapiDebug('[xAPI Service] Response body:', response?.body);
       return response;
     } catch (err) {
       console.error('[xAPI Service] HTTP error:', err.status, err.statusText);

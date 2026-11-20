@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { nativeXapiRelay } from './xapi-relay';
+import { xapiDebug } from './xapi-debug';
 
 /**
  * OfflineOutboxService
@@ -98,7 +99,7 @@ export class OfflineOutboxService {
     if (id) {
       const already = items.find(item => item.type === 'form-response' && item.response && item.response._id === id);
       if (already) {
-        console.log('[Outbox] Response', id, 'already queued; skipping.');
+        xapiDebug('[Outbox] Response', id, 'already queued; skipping.');
         return items.length;
       }
     }
@@ -110,7 +111,7 @@ export class OfflineOutboxService {
       queuedAt: Date.now()
     });
     this.write(items);
-    console.log('[Outbox] Queued form response for offline delivery (pending:', items.length + ')');
+    xapiDebug('[Outbox] Queued form response for offline delivery (pending:', items.length + ')');
     this.scheduleRetryIfOnline();
     return items.length;
   }
@@ -134,7 +135,7 @@ export class OfflineOutboxService {
             statementsJson: JSON.stringify(statements)
           });
           if (accepted) {
-            console.log('[Outbox] Handed', statements.length, 'xAPI statement(s) to the native IPC relay.');
+            xapiDebug('[Outbox] Handed', statements.length, 'xAPI statement(s) to the native IPC relay.');
             return this.pendingCount();
           }
         } catch (error) {
@@ -153,7 +154,7 @@ export class OfflineOutboxService {
       queuedAt: Date.now()
     });
     this.write(items);
-    console.log('[Outbox] Queued', statements.length, 'xAPI statement(s) for offline delivery (pending:', items.length + ')');
+    xapiDebug('[Outbox] Queued', statements.length, 'xAPI statement(s) for offline delivery (pending:', items.length + ')');
     this.scheduleRetryIfOnline();
     return items.length;
   }
@@ -238,11 +239,11 @@ export class OfflineOutboxService {
     if (offline && !nativeXapiRelay(typeof window === 'undefined' ? null : window)) {
       // If the browser knows we have no connectivity, don't even try (the
       // requests would just hang/fail); we'll be woken again by the online event.
-      console.log('[Outbox] Still offline;', items.length, 'item(s) remain queued.');
+      xapiDebug('[Outbox] Still offline;', items.length, 'item(s) remain queued.');
       return items.length;
     }
 
-    console.log('[Outbox] Flushing', items.length, 'queued item(s)...');
+    xapiDebug('[Outbox] Flushing', items.length, 'queued item(s)...');
     const remaining: OutboxItem[] = [];
     for (const item of items) {
       try {
@@ -256,14 +257,14 @@ export class OfflineOutboxService {
         } else {
           await this.sendQueuedXapiStatements(item);
         }
-        console.log('[Outbox] Delivered', item.type === 'form-response' ? 'form response' : 'xAPI statements');
+        xapiDebug('[Outbox] Delivered', item.type === 'form-response' ? 'form response' : 'xAPI statements');
       } catch (error) {
         console.warn('[Outbox] Delivery failed for', item.type, '- will retry later:', error && error.message || error);
         remaining.push(item);
       }
     }
     this.write(remaining);
-    console.log('[Outbox] Flush finished;', remaining.length, 'item(s) still pending.');
+    xapiDebug('[Outbox] Flush finished;', remaining.length, 'item(s) still pending.');
     // If anything could not be delivered but the browser still thinks we are
     // online, keep trying in the background rather than waiting for an 'online'
     // event or an app restart.

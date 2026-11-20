@@ -17,7 +17,9 @@ export class TangyInputBase extends PolymerElement {
     let xapiStatement = null;
     try {
       xapiStatement = shouldIncludeXapi(this) ? this.getXapiStatement() : null;
-      console.log(`[xAPI] ${this.tagName.toLowerCase()} getProps`, xapiStatement);
+      if (window.xapiDebug) {
+        console.log(`[xAPI] ${this.tagName.toLowerCase()} getProps`, xapiStatement);
+      }
     } catch (e) {
       console.error(`[xAPI] ${this.tagName.toLowerCase()} getProps error`, e);
     }

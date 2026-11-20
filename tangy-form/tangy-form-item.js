@@ -20,6 +20,8 @@ export class TangyFormItem extends PolymerElement {
   constructor() {
     super()
     this._injected = {}
+    this._helpers = {}
+    this._evalScope = {}
 
     this.sectionPromptQueue = new TangyPromptUtils();
   }
@@ -594,7 +596,7 @@ export class TangyFormItem extends PolymerElement {
     })
   }
 
-  eval(code, hook, context = '', hasResult = false) {
+  eval(code, hook, context = '', hasResult = false, scope = {}) {
     // Prepare some helper variables.
     let state = this.store.getState()
     // Inputs.
@@ -612,16 +614,20 @@ export class TangyFormItem extends PolymerElement {
     state.items.forEach(item => items[item.name] = item)
     let inputEls = this.querySelectorAll('[name]')
     let tangyFormStore = this.store
-    // Declare namespaces for helper functions for the eval context in form.on-change.
-    // We have to do this because bundlers modify the names of things that are imported
-    // but do not update the evaled code because it knows not of it.
-    let {getValue, getValueAsMoment, inputHide, inputShow, skip, unskip, inputDisable, inputEnable, itemHide, itemShow, itemDisable, itemEnable, isChecked, notChecked, itemsPerMinute, numberOfItemsAttempted, numberOfCorrectItems, numberOfIncorrectItems, gridAutoStopped, hideInputsUponThreshhold, goTo, goToEnd} = this.exposeHelperFunctions()
+    // Expose the helper functions and any additional variables (like the input being
+    // validated) to the eval context. They are stored on the element and declared inside
+    // the evaled code by name at runtime because bundlers drop local variables that are
+    // only referenced from evaled strings.
+    this._helpers = this.exposeHelperFunctions()
+    this._evalScope = scope
     if (this.hasAttribute("incorrect-threshold")) {
-      hideInputsUponThreshhold(this)
+      this._helpers.hideInputsUponThreshhold(this)
     }
     try {
       const result = eval(`
         (() => {
+          ${Object.keys(this._helpers).map(name => `var ${name} = this._helpers['${name}']`).join('\n')}
+          ${Object.keys(this._evalScope).map(name => `var ${name} = this._evalScope['${name}']`).join('\n')}
           ${Object.keys(this._injected).map(name => `var ${name} = this._injected['${name}']`).join('\n')}
           ${hasResult ? `return ` : ``}${code}
         })()
@@ -901,8 +907,7 @@ export class TangyFormItem extends PolymerElement {
     let firstInputWithIssue = ''
     for (let input of inputEls) {
       if (!input.hidden && !input.skipped) {
-        let {getValue, getValueAsMoment, inputHide, inputShow, skip, unskip, inputDisable, inputEnable, itemHide, itemShow, itemDisable, itemEnable, isChecked, notChecked, itemsPerMinute, numberOfItemsAttempted, numberOfCorrectItems, numberOfIncorrectItems, gridAutoStopped, hideInputsUponThreshhold} = this.exposeHelperFunctions();
-        if ((input.validate && !input.validate()) || (input.hasAttribute('valid-if') && !eval(input.getAttribute('valid-if')))) {
+        if ((input.validate && !input.validate()) || (input.hasAttribute('valid-if') && !this.eval(input.getAttribute('valid-if'), 'valid-if', input.name, true, { input }))) {
           input.invalid = true
           if (!firstInputWithIssue) firstInputWithIssue = input.name
           invalidInputNames.push(input.name)
@@ -910,14 +915,14 @@ export class TangyFormItem extends PolymerElement {
           input.invalid = false
           validInputNames.push(input.name)
         }
-        if (input.hasAttribute('warn-if') && eval(input.getAttribute('warn-if'))) {
+        if (input.hasAttribute('warn-if') && this.eval(input.getAttribute('warn-if'), 'warn-if', input.name, true, { input })) {
           input.hasWarning = true
           if (!firstInputWithIssue) firstInputWithIssue = input.name
           hasWarnings.push({ name: input.name, value: input.value})
         } else {
           input.hasWarning = false
         }
-        if (input.hasAttribute('discrepancy-if') && eval(input.getAttribute('discrepancy-if'))) {
+        if (input.hasAttribute('discrepancy-if') && this.eval(input.getAttribute('discrepancy-if'), 'discrepancy-if', input.name, true, { input })) {
           input.hasDiscrepancy = true
           if (!firstInputWithIssue) firstInputWithIssue = input.name
           hasDiscrepancies.push({ name: input.name, value: input.value})

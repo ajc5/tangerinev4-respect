@@ -7,6 +7,7 @@ import { OfflineOutboxService } from 'src/app/shared/_services/offline-outbox.se
 import { nativeXapiRelay } from 'src/app/shared/_services/xapi-relay';
 import { CaseService } from 'src/app/case/services/case.service';
 import { TangyFormService } from '../tangy-form.service';
+import { xapiDebug } from 'src/app/shared/_services/xapi-debug';
 declare const ADL: any;
 
 const sleep = (milliseconds) => new Promise((res) => setTimeout(() => res(true), milliseconds))
@@ -209,39 +210,39 @@ export class TangyFormsPlayerComponent implements OnInit, OnDestroy {
    * Populate LRS configuration from URL query parameters (endpoint, auth, actor, registration).
    */
   private populateXapiFromUrlParams(): void {
-    console.log('[xAPI Debug] Checking URL query parameters:', window.location.search);
+    xapiDebug('[xAPI Debug] Checking URL query parameters:', window.location.search);
     const urlParams = new URLSearchParams(window.location.search);
 
     if (urlParams.has('endpoint')) {
       const endpoint = this.validateEndpoint(urlParams.get('endpoint'));
       this.lrsEndpoint = endpoint || '';
       this.xapiDebugInfo.endpoint = this.lrsEndpoint;
-      console.log('[xAPI Debug] Endpoint from URL:', this.lrsEndpoint || '(rejected - not a valid http(s) URL)');
+      xapiDebug('[xAPI Debug] Endpoint from URL:', this.lrsEndpoint || '(rejected - not a valid http(s) URL)');
     }
     if (urlParams.has('auth')) {
       this.lrsAuth = urlParams.get('auth') || '';
       this.xapiDebugInfo.auth = this.lrsAuth;
-      console.log('[xAPI Debug] Auth from URL:', this.lrsAuth);
+      xapiDebug('[xAPI Debug] Auth from URL:', this.lrsAuth);
     }
     if (urlParams.has('xapiIpcPackage')) {
       this.lrsIpcPackage = urlParams.get('xapiIpcPackage') || '';
       this.xapiDebugInfo.ipcPackage = this.lrsIpcPackage;
-      console.log('[xAPI Debug] xapiIpcPackage from URL:', this.lrsIpcPackage);
+      xapiDebug('[xAPI Debug] xapiIpcPackage from URL:', this.lrsIpcPackage);
     }
 
     // Use a provided registration, or leave undefined so generateUUID is used
     if (urlParams.has('registration')) {
       this.lrsRegistration = urlParams.get('registration') || '';
       this.xapiDebugInfo.registration = this.lrsRegistration;
-      console.log('[xAPI Debug] Registration from URL:', this.lrsRegistration);
+      xapiDebug('[xAPI Debug] Registration from URL:', this.lrsRegistration);
     }
     if (urlParams.has('actor')) {
       try {
         this.lrsActor = JSON.parse(urlParams.get('actor'));
         this.xapiDebugInfo.actor = this.lrsActor.name || JSON.stringify(this.lrsActor);
-        console.log('[xAPI Debug] Actor from URL:', this.lrsActor);
+        xapiDebug('[xAPI Debug] Actor from URL:', this.lrsActor);
       } catch (e) {
-        console.log('[xAPI Debug] Failed to parse actor from URL');
+        xapiDebug('[xAPI Debug] Failed to parse actor from URL');
       }
     }
 
@@ -250,7 +251,7 @@ export class TangyFormsPlayerComponent implements OnInit, OnDestroy {
     if (this.lrsAuth && !this.xapiDebugInfo.auth) this.xapiDebugInfo.auth = this.lrsAuth;
 
     if (!urlParams.has('endpoint') && !urlParams.has('auth') && !urlParams.has('registration')) {
-      console.log('[xAPI Debug] No xAPI URL parameters found. Using @Input values if provided.');
+      xapiDebug('[xAPI Debug] No xAPI URL parameters found. Using @Input values if provided.');
     }
   }
 
@@ -335,23 +336,23 @@ private validateEndpoint(value: string | null): string | undefined {
    * Collect xAPI statements from form inputs and send them all in a single batch request to the LRS.
    */
   private async sendXapiStatements(formElement: any): Promise<void> {
-    console.log('[xAPI Debug] sendXapiStatements called');
+    xapiDebug('[xAPI Debug] sendXapiStatements called');
     
     // Skip if LRS is not configured or actor is missing
     if (!this.lrsEndpoint || !this.lrsAuth || !this.lrsActor) {
-      console.log('[xAPI Debug] Skipping – endpoint/auth/actor not fully configured. endpoint:', this.lrsEndpoint, 'auth:', this.lrsAuth, 'actor:', this.lrsActor);
+      xapiDebug('[xAPI Debug] Skipping – endpoint/auth/actor not fully configured. endpoint:', this.lrsEndpoint, 'auth:', this.lrsAuth, 'actor:', this.lrsActor);
       return;
     }
 
     const inputs = formElement.inputs || [];
     if (inputs.length === 0) {
-      console.log('[xAPI Debug] No inputs found on form element');
+      xapiDebug('[xAPI Debug] No inputs found on form element');
       return;
     }
 
     // Use the registration from URL params, or generate a new one for this submission
     const registration = this.lrsRegistration || this.generateUUID();
-    console.log('[xAPI Debug] Using registration:', registration);
+    xapiDebug('[xAPI Debug] Using registration:', registration);
 
     // Collect all statements from inputs that have xapiStatement data
     const statements = [];
@@ -383,12 +384,12 @@ private validateEndpoint(value: string | null): string | undefined {
     }
 
     if (statements.length === 0) {
-      console.log('[xAPI Debug] No inputs with xapiStatement property found');
+      xapiDebug('[xAPI Debug] No inputs with xapiStatement property found');
       return;
     }
 
-    console.log('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
-    console.log('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
+    xapiDebug('[xAPI Debug] Sending', statements.length, 'statements to', this.lrsEndpoint);
+    xapiDebug('[xAPI Debug] Statements JSON:', JSON.stringify(statements, null, 2));
 
     // Relay over IPC whenever the hosting app offers it - INCLUDING while offline. The
     // hop to the launcher is a local Binder call; only the launcher's own POST to the LRS
@@ -399,7 +400,7 @@ private validateEndpoint(value: string | null): string | undefined {
     const relay = nativeXapiRelay(this.window);
     if (relay && this.lrsIpcPackage) {
       const online = typeof navigator === 'undefined' || navigator.onLine !== false;
-      console.log('[xAPI Debug] Relaying', statements.length, 'statements via native IPC to', this.lrsIpcPackage, '(online:', online + ')');
+      xapiDebug('[xAPI Debug] Relaying', statements.length, 'statements via native IPC to', this.lrsIpcPackage, '(online:', online + ')');
       try {
         await relay.forward({
           endpoint: this.lrsEndpoint,
@@ -407,11 +408,11 @@ private validateEndpoint(value: string | null): string | undefined {
           ipcPackage: this.lrsIpcPackage,
           statementsJson: JSON.stringify(statements)
         });
-        console.log('[xAPI Debug] Statements handed to the native IPC relay');
+        xapiDebug('[xAPI Debug] Statements handed to the native IPC relay');
         return;
       } catch (error) {
         console.error('[xAPI Debug] Statements relay FAILED:', error);
-        console.log('[xAPI Debug] Falling back to the outbox so the batch is not lost.');
+        xapiDebug('[xAPI Debug] Falling back to the outbox so the batch is not lost.');
       }
     }
 
@@ -419,7 +420,7 @@ private validateEndpoint(value: string | null): string | undefined {
     // IPC package). Offline, keep the whole batch - with the endpoint/auth it needs - so a
     // later attempt can complete it.
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      console.log('[xAPI Debug] Offline - queueing', statements.length, 'statements for later delivery.');
+      xapiDebug('[xAPI Debug] Offline - queueing', statements.length, 'statements for later delivery.');
       try {
         await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);
       } catch (queueError) {
@@ -447,24 +448,24 @@ private validateEndpoint(value: string | null): string | undefined {
       const xhr = res && res.xhr;
       if (xhr) {
         xhr.addEventListener('load', () => {
-          console.log('[xAPI Debug] XHR status:', xhr.status, xhr.statusText);
+          xapiDebug('[xAPI Debug] XHR status:', xhr.status, xhr.statusText);
           if (xhr.status >= 200 && xhr.status < 300) {
-            console.log('[xAPI Debug] Statements DELIVERED to LRS:', xhr.responseText);
+            xapiDebug('[xAPI Debug] Statements DELIVERED to LRS:', xhr.responseText);
           } else {
             console.error('[xAPI Debug] Statements REJECTED by LRS:', xhr.status, xhr.statusText, 'body:', xhr.responseText);
           }
         });
         xhr.addEventListener('error', () => {
           console.error('[xAPI Debug] Statements FAILED to send (blocked/network/CORS/mixed-content). readyState:', xhr.readyState, 'status:', xhr.status);
-          console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
+          xapiDebug('[xAPI Debug] Queueing statements for later delivery via outbox.');
           this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage)
             .catch(e => console.error('[xAPI Debug] Failed to queue statements:', e));
         });
       }
-      console.log('[xAPI Debug] Submission result:', res, statements);
+      xapiDebug('[xAPI Debug] Submission result:', res, statements);
     } catch (error) {
       console.error('[xAPI Debug] Submission failed:', error);
-      console.log('[xAPI Debug] Queueing statements for later delivery via outbox.');
+      xapiDebug('[xAPI Debug] Queueing statements for later delivery via outbox.');
       this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage)
         .catch(e => console.error('[xAPI Debug] Failed to queue statements:', e));
     }
@@ -485,7 +486,7 @@ private validateEndpoint(value: string | null): string | undefined {
       }
       const response = { ...formResponse, groupId: config.groupId };
       const pending = await this.offlineOutbox.queueFormResponse(response, config.formUploadURL, config.uploadKey);
-      console.log('[Offline] Form response queued for delivery when back online (pending:', pending + ').');
+      xapiDebug('[Offline] Form response queued for delivery when back online (pending:', pending + ').');
     } catch (error) {
       console.error('[Offline] Could not queue form response for later upload:', error);
     }
@@ -495,7 +496,7 @@ private validateEndpoint(value: string | null): string | undefined {
   private flushOutbox(): void {
     this.offlineOutbox.flush().then(remaining => {
       if (remaining > 0) {
-        console.log('[Offline]', remaining, 'submission(s) still waiting for connectivity.');
+        xapiDebug('[Offline]', remaining, 'submission(s) still waiting for connectivity.');
       }
     }).catch(error => {
       console.warn('[Offline] Outbox flush error:', error);
