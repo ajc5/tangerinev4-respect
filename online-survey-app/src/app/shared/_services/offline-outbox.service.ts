@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { nativeXapiRelay } from './xapi-relay';
+import { isLocalXapiEndpoint, nativeXapiRelay } from './xapi-relay';
 import { xapiDebug } from './xapi-debug';
 
 /**
@@ -112,7 +112,7 @@ export class OfflineOutboxService {
     });
     this.write(items);
     xapiDebug('[Outbox] Queued form response for offline delivery (pending:', items.length + ')');
-    this.scheduleRetryIfOnline();
+    this.scheduleRetryIfDeliverable();
     return items.length;
   }
 
@@ -155,7 +155,7 @@ export class OfflineOutboxService {
     });
     this.write(items);
     xapiDebug('[Outbox] Queued', statements.length, 'xAPI statement(s) for offline delivery (pending:', items.length + ')');
-    this.scheduleRetryIfOnline();
+    this.scheduleRetryIfDeliverable();
     return items.length;
   }
 
@@ -176,7 +176,8 @@ export class OfflineOutboxService {
   // unreachable), navigator.onLine stays true the whole time, so no 'online'
   // event ever fires and queued submissions would sit forever. This loop keeps
   // scheduling flush attempts (with exponential backoff) while items remain
-  // queued and the browser believes we are online, so they are delivered as
+  // queued and either the browser believes we are online or the host can take a
+  // batch locally (IPC relay / loopback endpoint), so they are delivered as
   // soon as the server is reachable again - with no user action required.
   private retryTimer: any = null;
   private retryAttempt = 0;
@@ -202,9 +203,11 @@ export class OfflineOutboxService {
     this.retryAttempt = Math.min(this.retryAttempt + 1, 20);
     this.retryTimer = setTimeout(async () => {
       this.retryTimer = null;
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        // Truly offline (airplane mode etc.): stop retrying - the 'online'
-        // event will wake us again. Reset so the next attempt starts fresh.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false
+          && !this.canDeliverOffline(this.read())) {
+        // Truly offline (airplane mode etc.) with nothing the host can take
+        // locally: stop retrying - the 'online' event will wake us again. Reset
+        // so the next attempt starts fresh.
         this.retryAttempt = 0;
         return;
       }
@@ -217,18 +220,32 @@ export class OfflineOutboxService {
     }, delay);
   }
 
+  /**
+   * True when at least one queued item can be delivered with no connectivity: an
+   * xAPI batch the host takes over IPC (a local Binder call), or one destined for a
+   * launcher-local endpoint (RESPECT's embedded xAPI server on 127.0.0.1). Form
+   * responses and remote endpoints need the network.
+   */
+  private canDeliverOffline(items: OutboxItem[]): boolean {
+    const relay = nativeXapiRelay(typeof window === 'undefined' ? null : window);
+    return items.some(item => item.type === 'xapi-statements'
+      && (isLocalXapiEndpoint(item.endpoint) || (!!item.ipcPackage && !!relay)));
+  }
+
   /** Kick off the retry loop only when it can make progress right now. */
-  private scheduleRetryIfOnline(): void {
-    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+  private scheduleRetryIfDeliverable(): void {
+    if (typeof navigator === 'undefined' || navigator.onLine !== false
+        || this.canDeliverOffline(this.read())) {
       this.scheduleRetry();
     }
   }
 
   private async doFlush(): Promise<number> {
     // A device with no connectivity cannot upload a form response, but it CAN still hand
-    // an xAPI batch to the launcher over IPC (a local Binder call). Only skip the whole
-    // flush when there is no relay either - otherwise we would wait for an 'online' event
-    // to do something that never needed the network.
+    // an xAPI batch to the launcher over IPC (a local Binder call) or post it to a
+    // launcher-local endpoint (RESPECT's embedded server on 127.0.0.1). Only skip the
+    // whole flush when no item can go that way - otherwise we would wait for an 'online'
+    // event to do something that never needed the network.
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
     const items = this.read();
@@ -236,7 +253,7 @@ export class OfflineOutboxService {
       return 0;
     }
 
-    if (offline && !nativeXapiRelay(typeof window === 'undefined' ? null : window)) {
+    if (offline && !this.canDeliverOffline(items)) {
       // If the browser knows we have no connectivity, don't even try (the
       // requests would just hang/fail); we'll be woken again by the online event.
       xapiDebug('[Outbox] Still offline;', items.length, 'item(s) remain queued.');
@@ -255,6 +272,13 @@ export class OfflineOutboxService {
           }
           await this.sendQueuedFormResponse(item);
         } else {
+          const relayAvailable = !!item.ipcPackage
+            && !!nativeXapiRelay(typeof window === 'undefined' ? null : window);
+          if (offline && !relayAvailable && !isLocalXapiEndpoint(item.endpoint)) {
+            // Nothing local can take this batch yet; keep it for the next attempt.
+            remaining.push(item);
+            continue;
+          }
           await this.sendQueuedXapiStatements(item);
         }
         xapiDebug('[Outbox] Delivered', item.type === 'form-response' ? 'form response' : 'xAPI statements');
@@ -269,7 +293,7 @@ export class OfflineOutboxService {
     // online, keep trying in the background rather than waiting for an 'online'
     // event or an app restart.
     if (remaining.length > 0) {
-      this.scheduleRetryIfOnline();
+      this.scheduleRetryIfDeliverable();
     }
     return remaining.length;
   }

@@ -4,7 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { FormsService } from 'src/app/shared/_services/forms-service.service';
 import { AppConfigService } from 'src/app/shared/_services/app-config.service';
 import { OfflineOutboxService } from 'src/app/shared/_services/offline-outbox.service';
-import { nativeXapiRelay } from 'src/app/shared/_services/xapi-relay';
+import { isLocalXapiEndpoint, nativeXapiRelay } from 'src/app/shared/_services/xapi-relay';
 import { CaseService } from 'src/app/case/services/case.service';
 import { TangyFormService } from '../tangy-form.service';
 import { xapiDebug } from 'src/app/shared/_services/xapi-debug';
@@ -417,9 +417,13 @@ private validateEndpoint(value: string | null): string | undefined {
     }
 
     // No launcher to relay to (a plain browser, or a host that has not been handed the
-    // IPC package). Offline, keep the whole batch - with the endpoint/auth it needs - so a
-    // later attempt can complete it.
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    // IPC package). A host-local endpoint such as RESPECT's embedded xAPI server
+    // (http://127.0.0.1:<port>/e/<upstream>) is reachable with no network, so offline is
+    // not a reason to skip it: the host stores the batch and retries the LRS upload.
+    // Only a remote endpoint has to wait for an 'online' event, keeping the batch - with
+    // the endpoint/auth it needs - so a later attempt can complete it.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false
+        && !isLocalXapiEndpoint(this.lrsEndpoint)) {
       xapiDebug('[xAPI Debug] Offline - queueing', statements.length, 'statements for later delivery.');
       try {
         await this.offlineOutbox.queueXapiStatements(statements, this.lrsEndpoint, this.lrsAuth, this.lrsIpcPackage);

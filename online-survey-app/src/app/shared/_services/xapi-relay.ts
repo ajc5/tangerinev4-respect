@@ -94,3 +94,25 @@ export function nativeXapiRelay(win: any = typeof window === 'undefined' ? null 
 
   return null;
 }
+
+/** Hostnames that identify a server running on the device itself. */
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1', '[::1]'];
+
+/**
+ * True when the endpoint is served by the hosting app itself, e.g. RESPECT hands
+ * WebView content the URL of its embedded xAPI server
+ * (`http://127.0.0.1:<port>/e/<encoded-upstream-server>`). A loopback hop needs no
+ * connectivity at all, so it must be attempted even when the browser reports
+ * `navigator.onLine === false` - the host stores the batch and owns the retry that
+ * eventually reaches the LRS.
+ */
+export function isLocalXapiEndpoint(endpoint: string | null | undefined): boolean {
+  if (!endpoint) {
+    return false;
+  }
+  try {
+    return LOOPBACK_HOSTS.includes(new URL(endpoint).hostname.toLowerCase());
+  } catch (e) {
+    return false;
+  }
+}
